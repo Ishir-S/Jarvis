@@ -1,0 +1,504 @@
+/* =====================================================
+   JARVIS - CHAT MODULE (personality + memory + context)
+===================================================== */
+
+import { addSystemLog, notify } from "./ui.js";
+import { getSettings, setSettings, checkStatus, chatStream, generateJSON } from "./ollama.js";
+import * as memory from "./memory.js";
+import { classifyAndExecuteIntent } from "./commander.js";
+
+const fallbackResponses = [
+    "Command acknowledged.",
+    "Processing request...",
+    "Systems nominal, awaiting further instruction.",
+    "I've logged that for you.",
+    "Affirmative.",
+    "Analyzing... no anomalies detected.",
+    "Standing by."
+];
+
+const PERSONA_PROMPT = `You are JARVIS — a brilliant, unflappably composed AI assistant with a dry
+wit and genuine warmth, in the spirit of Tony Stark's JARVIS. You speak with
+polished, precise language and aren't above a well-placed touch of irony or a
+clever turn of phrase, but cleverness never gets in the way of being
+genuinely useful. When it helps someone understand something, you reach for
+an apt analogy or metaphor rather than a dry technical definition. You
+address the user warmly and personably — a light "sir" or similar is fine
+occasionally, but don't overdo it. You have a good memory for what's been
+discussed and you weave past context in naturally, the way a trusted
+assistant would, rather than reciting it back mechanically. Keep responses
+concise unless real depth is asked for.`;
+
+let history = memory.loadHistory();
+let ollamaAvailable = false;
+let userTurnsSinceLastMemoryUpdate = 0;
+let cachedWeatherBundle = null;
+
+/* =====================================================
+   INIT
+===================================================== */
+
+export function initChat() {
+
+    const input = document.getElementById("chatInput");
+    const sendBtn = document.getElementById("sendChat");
+    const messages = document.getElementById("chatMessages");
+
+    if (!input || !sendBtn || !messages) return;
+
+    rehydrateMessageUI(messages);
+
+    const send = () => {
+
+        const text = input.value.trim();
+        if (!text) return;
+
+        appendMessage(messages, text, "user-message");
+        input.value = "";
+
+        addSystemLog(`Chat: ${text}`);
+        respond(messages, text);
+    };
+
+    sendBtn.addEventListener("click", send);
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") send();
+    });
+
+    document.getElementById("chatOllamaRefresh")?.addEventListener("click", refreshChatConnection);
+
+    document.getElementById("chatModelSelect")?.addEventListener("change", (event) => {
+        setSettings({ model: event.target.value });
+    });
+
+    // memory panel
+    document.getElementById("chatMemoryToggle")?.addEventListener("click", toggleMemoryPanel);
+    document.getElementById("chatMemoryClose")?.addEventListener("click", () => setMemoryPanelVisible(false));
+    document.getElementById("chatClearMemoryBtn")?.addEventListener("click", handleClearMemory);
+    document.getElementById("chatClearHistoryBtn")?.addEventListener("click", handleClearHistory);
+
+    // location / weather
+    document.getElementById("chatSetLocationBtn")?.addEventListener("click", handleSetLocationByCity);
+    document.getElementById("chatUseGeoBtn")?.addEventListener("click", handleUseGeolocation);
+
+    updateDateTimeLine();
+    setInterval(updateDateTimeLine, 60000);
+
+    loadWeatherIntoContext({ promptForGeo: false });
+
+    refreshChatConnection();
+}
+
+/* Called by main.js right after the Chat panel is opened */
+export function refreshChatPanel() {
+
+    refreshChatConnection();
+    updateDateTimeLine();
+    loadWeatherIntoContext({ promptForGeo: false });
+}
+
+/* =====================================================
+   REHYDRATE PERSISTED HISTORY INTO THE UI
+===================================================== */
+
+function rehydrateMessageUI(messages) {
+
+    const turns = history.filter(m => m.role === "user" || m.role === "assistant");
+
+    if (!turns.length) {
+
+        messages.innerHTML = "";
+        appendMessage(messages, buildGreeting(), "bot-message", false);
+        return;
+    }
+
+    messages.innerHTML = "";
+
+    turns.forEach(m => {
+        appendMessage(messages, m.content, m.role === "user" ? "user-message" : "bot-message", false);
+    });
+
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function buildGreeting() {
+
+    const hour = new Date().getHours();
+
+    if (hour < 5) return "You're up rather late. All systems are online, should you need me.";
+    if (hour < 12) return "Good morning. All systems are online and functioning perfectly.";
+    if (hour < 17) return "Good afternoon. Standing by, as always.";
+    if (hour < 22) return "Good evening. At your service.";
+    return "Working late again. I'll be here — systems are fully online.";
+}
+
+/* =====================================================
+   CONNECTION BAR
+===================================================== */
+
+async function refreshChatConnection() {
+
+    const dot = document.getElementById("chatOllamaDot");
+    const label = document.getElementById("chatOllamaLabel");
+    const select = document.getElementById("chatModelSelect");
+
+    if (label) label.textContent = "Checking local AI engine...";
+
+    const { host } = getSettings();
+    const result = await checkStatus(host);
+
+    ollamaAvailable = result.connected && result.models.length > 0;
+
+    if (result.connected) {
+
+        dot?.classList.add("connected");
+
+        if (label) {
+            label.textContent = result.models.length ? "Local AI online" : "Connected, no models pulled";
+        }
+
+        if (select) {
+
+            const current = getSettings().model;
+            select.innerHTML = "";
+
+            if (result.models.length) {
+
+                result.models.forEach(name => {
+                    const opt = document.createElement("option");
+                    opt.value = name;
+                    opt.textContent = name;
+                    select.appendChild(opt);
+                });
+
+                const useModel = result.models.includes(current) ? current : result.models[0];
+                select.value = useModel;
+                setSettings({ model: useModel });
+
+            } else {
+
+                select.innerHTML = `<option value="">No models found</option>`;
+            }
+        }
+
+    } else {
+
+        dot?.classList.remove("connected");
+        if (label) label.textContent = "Local AI offline (using canned replies)";
+        if (select) select.innerHTML = `<option value="">No models found</option>`;
+    }
+}
+
+/* =====================================================
+   LIVE CONTEXT: DATE/TIME + WEATHER
+===================================================== */
+
+function updateDateTimeLine() {
+
+    const el = document.getElementById("chatDateTime");
+    if (el) el.textContent = memory.getDateTimeContext();
+}
+
+async function loadWeatherIntoContext({ promptForGeo }) {
+
+    const bundle = await memory.getWeatherContext({ allowGeolocationPrompt: promptForGeo });
+
+    cachedWeatherBundle = bundle;
+
+    const line = document.getElementById("chatWeatherLine");
+    if (!line) return;
+
+    line.textContent = bundle
+        ? memory.formatWeatherContext(bundle)
+        : "Weather unavailable — set a location below for JARVIS to factor it in.";
+}
+
+async function handleSetLocationByCity() {
+
+    const input = document.getElementById("chatLocationInput");
+    const city = input?.value.trim();
+
+    if (!city) return;
+
+    const line = document.getElementById("chatWeatherLine");
+    if (line) line.textContent = "Looking up that location...";
+
+    try {
+
+        const location = await memory.geocodeCity(city);
+        memory.saveLocation(location);
+
+        input.value = "";
+        await loadWeatherIntoContext({ promptForGeo: false });
+
+        notify(`Weather location set to ${location.name}`);
+
+    } catch (err) {
+
+        if (line) line.textContent = err.message;
+    }
+}
+
+async function handleUseGeolocation() {
+
+    const line = document.getElementById("chatWeatherLine");
+    if (line) line.textContent = "Requesting your location...";
+
+    try {
+
+        const location = await memory.requestBrowserLocation();
+        memory.saveLocation(location);
+
+        await loadWeatherIntoContext({ promptForGeo: false });
+
+        notify("Using your current location for weather");
+
+    } catch (err) {
+
+        if (line) line.textContent = err.message;
+    }
+}
+
+/* =====================================================
+   SYSTEM PROMPT ASSEMBLY (persona + memory + live context)
+===================================================== */
+
+function buildSystemPrompt(actionTaken) {
+
+    const parts = [PERSONA_PROMPT];
+
+    parts.push(`CURRENT DATE/TIME: ${memory.getDateTimeContext()}`);
+
+    const weatherLine = memory.formatWeatherContext(cachedWeatherBundle);
+    if (weatherLine) parts.push(`CURRENT WEATHER: ${weatherLine}`);
+
+    const longTermMemory = memory.loadLongTermMemory();
+
+    if (longTermMemory.length) {
+
+        parts.push(
+            `THINGS YOU REMEMBER ABOUT THIS USER FROM PAST CONVERSATIONS (weave these in naturally where relevant, don't just list them back):\n`
+            + longTermMemory.map(n => `- ${n}`).join("\n")
+        );
+    }
+
+    if (actionTaken) {
+
+        parts.push(
+            `You just took this real action on the user's behalf, on their interface, `
+            + `right before replying: "${actionTaken.action}" with parameters ${JSON.stringify(actionTaken.params)}. `
+            + `Acknowledge that you've done it, briefly and naturally, in character — don't describe it mechanically or repeat the raw action name.`
+        );
+    }
+
+    return parts.join("\n\n");
+}
+
+/* =====================================================
+   RESPONSE HANDLING
+===================================================== */
+
+async function respond(messages, text) {
+
+    if (!ollamaAvailable) {
+
+        setTimeout(() => {
+
+            const reply = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
+            appendMessage(messages, reply, "bot-message");
+
+        }, 500);
+
+        return;
+    }
+
+    history.push({ role: "user", content: text });
+    memory.saveHistory(history);
+
+    const { model, host } = getSettings();
+
+    const actionTaken = await classifyAndExecuteIntent(text);
+
+    const bubble = appendMessage(messages, "", "bot-message");
+    bubble.classList.add("streaming");
+
+    const outgoing = [{ role: "system", content: buildSystemPrompt(actionTaken) }, ...historyForModel()];
+
+    try {
+
+        const full = await chatStream(outgoing, {
+            model,
+            host,
+            onToken: (chunk, fullSoFar) => {
+
+                bubble.textContent = fullSoFar;
+                messages.scrollTop = messages.scrollHeight;
+            }
+        });
+
+        bubble.classList.remove("streaming");
+
+        history.push({ role: "assistant", content: full });
+        memory.saveHistory(history);
+
+        maybeUpdateLongTermMemory();
+
+    } catch (err) {
+
+        console.error(err);
+
+        bubble.classList.remove("streaming");
+        bubble.textContent = "Local AI request failed — falling back to standby mode. Check the connection bar above.";
+
+        ollamaAvailable = false;
+    }
+}
+
+function historyForModel() {
+
+    // exclude any stored system messages (we always rebuild a fresh one)
+    // and cap how much raw transcript we send per turn
+    const turns = history.filter(m => m.role !== "system");
+
+    return turns.length > 24 ? turns.slice(turns.length - 24) : turns;
+}
+
+/* =====================================================
+   BACKGROUND LONG-TERM MEMORY DISTILLATION
+===================================================== */
+
+function maybeUpdateLongTermMemory() {
+
+    userTurnsSinceLastMemoryUpdate++;
+
+    if (userTurnsSinceLastMemoryUpdate < 5) return;
+
+    userTurnsSinceLastMemoryUpdate = 0;
+    distillMemory(); // fire and forget; failure here shouldn't disrupt chat
+}
+
+async function distillMemory() {
+
+    const { model, host } = getSettings();
+    if (!model) return;
+
+    const recent = historyForModel().slice(-16);
+    if (!recent.length) return;
+
+    const transcript = recent.map(m => `${m.role === "user" ? "User" : "JARVIS"}: ${m.content}`).join("\n");
+
+    const prompt = `Read this conversation excerpt and extract 2-5 short, durable facts worth
+remembering about the user for future conversations (name, preferences,
+ongoing projects, recurring goals, communication style). Skip anything
+trivial or one-off. If nothing durable stands out, return an empty array.
+
+CONVERSATION:
+${transcript}
+
+Respond with ONLY valid JSON: { "facts": ["short fact", "..."] }`;
+
+    try {
+
+        const data = await generateJSON(prompt, { model, host });
+
+        if (Array.isArray(data.facts) && data.facts.length) {
+
+            memory.mergeLongTermMemory(data.facts);
+            addSystemLog(`JARVIS updated its memory (${data.facts.length} new note(s))`);
+
+            if (isMemoryPanelVisible()) renderMemoryList();
+        }
+
+    } catch {
+        // best-effort only — don't disrupt the chat experience on failure
+    }
+}
+
+/* =====================================================
+   MEMORY PANEL UI
+===================================================== */
+
+function isMemoryPanelVisible() {
+
+    return !document.getElementById("chatMemoryPanel")?.classList.contains("hidden");
+}
+
+function setMemoryPanelVisible(visible) {
+
+    const panel = document.getElementById("chatMemoryPanel");
+    if (!panel) return;
+
+    panel.classList.toggle("hidden", !visible);
+
+    if (visible) renderMemoryList();
+}
+
+function toggleMemoryPanel() {
+
+    setMemoryPanelVisible(!isMemoryPanelVisible());
+}
+
+function renderMemoryList() {
+
+    const list = document.getElementById("chatMemoryList");
+    if (!list) return;
+
+    const notes = memory.loadLongTermMemory();
+
+    list.innerHTML = "";
+
+    if (!notes.length) {
+
+        list.innerHTML = `<div class="chatMemoryItem">Nothing remembered yet — JARVIS distills durable facts every few exchanges as you chat.</div>`;
+        return;
+    }
+
+    notes.forEach(note => {
+
+        const item = document.createElement("div");
+        item.className = "chatMemoryItem";
+        item.textContent = note;
+        list.appendChild(item);
+    });
+}
+
+function handleClearMemory() {
+
+    memory.clearLongTermMemory();
+    renderMemoryList();
+    notify("Long-term memory cleared");
+    addSystemLog("JARVIS long-term memory cleared by user");
+}
+
+function handleClearHistory() {
+
+    memory.clearHistory();
+    history = [];
+
+    const messages = document.getElementById("chatMessages");
+    if (messages) {
+        messages.innerHTML = `<div class="bot-message">Very well — a clean slate. I'm still here.</div>`;
+    }
+
+    notify("Chat history cleared");
+    addSystemLog("Chat history cleared by user");
+}
+
+/* =====================================================
+   DOM HELPERS
+===================================================== */
+
+function appendMessage(container, text, className, scroll = true) {
+
+    const div = document.createElement("div");
+
+    div.className = className;
+    div.textContent = text;
+
+    container.appendChild(div);
+
+    if (scroll) container.scrollTop = container.scrollHeight;
+
+    return div;
+}
