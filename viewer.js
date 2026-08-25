@@ -1,6 +1,10 @@
 /* =====================================================
    JARVIS - 3D VIEWER MODULE
-   Real textures + live animation for every scene
+   Real textures + live animation for every scene, plus a
+   professional toolkit: multi-part STL import, an
+   outliner, transform gizmo, orientation gizmo, wireframe/
+   grid/lighting controls, and real hand-gesture + voice
+   control over the scene.
 ===================================================== */
 
 import * as THREE from "three";
@@ -8,8 +12,17 @@ import * as THREE from "three";
 import { GLTFLoader }
 from "https://unpkg.com/three@0.165.0/examples/jsm/loaders/GLTFLoader.js";
 
+import { STLLoader }
+from "https://unpkg.com/three@0.165.0/examples/jsm/loaders/STLLoader.js";
+
 import { OrbitControls }
 from "https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js";
+
+import { TransformControls }
+from "https://unpkg.com/three@0.165.0/examples/jsm/controls/TransformControls.js";
+
+import { addSystemLog, notify } from "./ui.js";
+import { startHandTracking, onHandResult } from "./handTracking.js";
 
 const TEX_BASE =
     "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/";
@@ -21,10 +34,41 @@ let renderer;
 let scene;
 let camera;
 let controls;
+let transformControls;
 
 let currentGroup = null;
 let currentUpdate = null; // (elapsed, delta) => void, set per-scene
 let initialized = false;
+
+let defaultCameraPos = new THREE.Vector3(0, 2, 8);
+let defaultTarget = new THREE.Vector3(0, 0, 0);
+
+let wireframeOn = false;
+let gridHelper = null;
+let lightingPresetIndex = 0;
+let sceneLights = {};
+
+/* Multi-part STL/imported scene management */
+let parts = []; // { id, name, mesh, visible }
+let nextPartId = 1;
+let selectedPart = null;
+let raycaster, mouse;
+let justFinishedDragging = false;
+
+/* Axis orientation gizmo (small second renderer) */
+let gizmoRenderer, gizmoScene, gizmoCamera;
+
+/* Gesture control state */
+let gestureVideo = null;
+let gestureStream = null;
+let gestureEnabled = false;
+let lastGestureByHand = {};
+let gestureDragOrigin = null;
+let gestureOrbitState = null;
+
+/* Voice control state */
+let recognition = null;
+let voiceEnabled = false;
 
 /* =====================================================
    INIT
@@ -58,6 +102,66 @@ export function initViewer() {
     document
         .getElementById("modelFile")
         ?.addEventListener("change", handleFileImport);
+
+    document
+        .getElementById("loadStlBtn")
+        ?.addEventListener("click", () => {
+
+            document.getElementById("stlFileInput")?.click();
+        });
+
+    document
+        .getElementById("stlFileInput")
+        ?.addEventListener("change", handleStlImport);
+
+    document
+        .getElementById("clearPartsBtn")
+        ?.addEventListener("click", clearAllParts);
+
+    document
+        .getElementById("toggleWireframe")
+        ?.addEventListener("click", toggleWireframe);
+
+    document
+        .getElementById("toggleGrid")
+        ?.addEventListener("click", toggleGrid);
+
+    document
+        .getElementById("cycleLighting")
+        ?.addEventListener("click", cycleLighting);
+
+    document
+        .getElementById("resetViewBtn")
+        ?.addEventListener("click", resetView);
+
+    document
+        .getElementById("gestureControlToggle")
+        ?.addEventListener("change", (e) => toggleGestureControl(e.target.checked));
+
+    document
+        .getElementById("voiceControlToggle")
+        ?.addEventListener("change", (e) => toggleVoiceControl(e.target.checked));
+
+    setupTabs();
+}
+
+function setupTabs() {
+
+    document.querySelectorAll(".viewerTabBtn").forEach(btn => {
+
+        btn.addEventListener("click", () => {
+
+            document.querySelectorAll(".viewerTabBtn").forEach(b => b.classList.remove("active"));
+            document.querySelectorAll(".viewerTabPanel").forEach(p => p.classList.remove("active"));
+
+            btn.classList.add("active");
+            document.getElementById(`tab${capitalize(btn.dataset.tab)}`)?.classList.add("active");
+        });
+    });
+}
+
+function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 function ensureRenderer() {
@@ -78,7 +182,7 @@ function ensureRenderer() {
         1000
     );
 
-    camera.position.set(0, 2, 8);
+    camera.position.copy(defaultCameraPos);
 
     renderer = new THREE.WebGLRenderer({
         canvas,
@@ -92,23 +196,191 @@ function ensureRenderer() {
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambient);
-
-    const point = new THREE.PointLight(0x00ffff, 4, 100);
-    point.position.set(5, 5, 5);
-    scene.add(point);
+    buildLights("studio");
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.target.copy(defaultTarget);
+
+    transformControls = new TransformControls(camera, renderer.domElement);
+    transformControls.setMode("translate");
+    transformControls.addEventListener("dragging-changed", (event) => {
+        controls.enabled = !event.value;
+        if (!event.value) justFinishedDragging = true;
+    });
+    scene.add(transformControls.getHelper ? transformControls.getHelper() : transformControls);
+
+    gridHelper = new THREE.GridHelper(20, 20, 0x00ffff, 0x113344);
+    gridHelper.visible = false;
+    scene.add(gridHelper);
+
+    raycaster = new THREE.Raycaster();
+    mouse = new THREE.Vector2();
+
+    renderer.domElement.addEventListener("click", handleViewerClick);
 
     window.addEventListener("resize", resizeViewer);
+
+    initAxisGizmo();
 
     resizeViewer();
 
     clock.start();
     animateViewer();
 }
+
+/* =====================================================
+   LIGHTING PRESETS
+===================================================== */
+
+function buildLights(preset) {
+
+    Object.values(sceneLights).forEach(light => scene.remove(light));
+    sceneLights = {};
+
+    if (preset === "studio") {
+
+        sceneLights.ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        sceneLights.key = new THREE.PointLight(0x00ffff, 4, 100);
+        sceneLights.key.position.set(5, 5, 5);
+        sceneLights.fill = new THREE.PointLight(0xffffff, 1.5, 100);
+        sceneLights.fill.position.set(-5, 2, -5);
+
+    } else if (preset === "outdoor") {
+
+        sceneLights.ambient = new THREE.HemisphereLight(0xbfd9ff, 0x554433, 1.1);
+        sceneLights.key = new THREE.DirectionalLight(0xfff2cc, 1.6);
+        sceneLights.key.position.set(8, 10, 6);
+
+    } else { // dark / moody
+
+        sceneLights.ambient = new THREE.AmbientLight(0x223344, 0.35);
+        sceneLights.key = new THREE.PointLight(0x00ffff, 5, 60);
+        sceneLights.key.position.set(3, 4, 3);
+    }
+
+    Object.values(sceneLights).forEach(light => scene.add(light));
+}
+
+function cycleLighting() {
+
+    const presets = ["studio", "outdoor", "dark"];
+    lightingPresetIndex = (lightingPresetIndex + 1) % presets.length;
+
+    buildLights(presets[lightingPresetIndex]);
+    notify(`Lighting: ${presets[lightingPresetIndex]}`);
+}
+
+/* =====================================================
+   TOOLBAR ACTIONS
+===================================================== */
+
+function toggleWireframe() {
+
+    wireframeOn = !wireframeOn;
+
+    document.getElementById("toggleWireframe")?.classList.toggle("active", wireframeOn);
+
+    applyWireframeToAll();
+}
+
+function applyWireframeToAll() {
+
+    parts.forEach(p => setWireframeRecursive(p.mesh, wireframeOn));
+
+    if (currentGroup) setWireframeRecursive(currentGroup, wireframeOn);
+}
+
+function setWireframeRecursive(object, on) {
+
+    object.traverse(child => {
+
+        if (child.material) {
+
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach(m => { if ("wireframe" in m) m.wireframe = on; });
+        }
+    });
+}
+
+function toggleGrid() {
+
+    if (!gridHelper) return;
+
+    gridHelper.visible = !gridHelper.visible;
+    document.getElementById("toggleGrid")?.classList.toggle("active", gridHelper.visible);
+}
+
+function resetView() {
+
+    camera.position.copy(defaultCameraPos);
+    controls.target.copy(defaultTarget);
+    controls.update();
+}
+
+/* =====================================================
+   AXIS ORIENTATION GIZMO (small, self-contained)
+===================================================== */
+
+function initAxisGizmo() {
+
+    const canvas = document.getElementById("viewerAxisGizmo");
+    if (!canvas) return;
+
+    gizmoRenderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    gizmoRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    gizmoRenderer.setSize(canvas.clientWidth || 90, canvas.clientHeight || 90, false);
+
+    gizmoScene = new THREE.Scene();
+
+    gizmoCamera = new THREE.OrthographicCamera(-1.6, 1.6, 1.6, -1.6, 0.1, 10);
+    gizmoCamera.position.set(0, 0, 4);
+
+    const axes = [
+        { dir: [1, 0, 0], color: 0xff4444 },
+        { dir: [0, 1, 0], color: 0x44ff66 },
+        { dir: [0, 0, 1], color: 0x4488ff }
+    ];
+
+    axes.forEach(axis => {
+
+        const points = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(...axis.dir).multiplyScalar(1.1)
+        ];
+
+        const line = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(points),
+            new THREE.LineBasicMaterial({ color: axis.color })
+        );
+
+        gizmoScene.add(line);
+
+        const tip = new THREE.Mesh(
+            new THREE.SphereGeometry(0.14, 12, 12),
+            new THREE.MeshBasicMaterial({ color: axis.color })
+        );
+
+        tip.position.set(...axis.dir).multiplyScalar(1.1);
+        gizmoScene.add(tip);
+    });
+}
+
+function renderAxisGizmo() {
+
+    if (!gizmoRenderer || !camera) return;
+
+    // mirror the main camera's rotation so the gizmo always shows
+    // the current viewing orientation, CAD-viewport style
+    gizmoCamera.position.copy(camera.position).sub(controls.target).normalize().multiplyScalar(4);
+    gizmoCamera.lookAt(0, 0, 0);
+
+    gizmoRenderer.render(gizmoScene, gizmoCamera);
+}
+
+/* =====================================================
+   RESIZE / ANIMATE
+===================================================== */
 
 function resizeViewer() {
 
@@ -126,6 +398,12 @@ function resizeViewer() {
 
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+
+    const gizmoCanvas = document.getElementById("viewerAxisGizmo");
+
+    if (gizmoRenderer && gizmoCanvas) {
+        gizmoRenderer.setSize(gizmoCanvas.clientWidth || 90, gizmoCanvas.clientHeight || 90, false);
+    }
 }
 
 function animateViewer() {
@@ -147,8 +425,15 @@ function animateViewer() {
 
     controls?.update();
 
+    updateGestureOrbit();
+
     renderer?.render(scene, camera);
+    renderAxisGizmo();
 }
+
+/* =====================================================
+   SCENE / PART CLEARING
+===================================================== */
 
 function clearScene() {
 
@@ -160,6 +445,8 @@ function clearScene() {
     }
 
     currentUpdate = null;
+
+    clearAllParts();
 }
 
 function disposeGroup(group) {
@@ -217,13 +504,6 @@ function loadScene(builder) {
 
     scene.add(currentGroup);
 }
-
-/* =====================================================
-   PROCEDURAL TEXTURE HELPERS
-   (canvas-generated, so every planet/atom gets a real,
-   unique surface instead of a flat solid color)
-===================================================== */
-
 function makeCanvas(size = 256) {
 
     const canvas = document.createElement("canvas");
@@ -897,8 +1177,9 @@ function buildStarfield() {
     );
 }
 
+
 /* =====================================================
-   CUSTOM MODEL IMPORT
+   GLTF / GLB IMPORT (single model, same slot as scenes)
 ===================================================== */
 
 function handleFileImport(event) {
@@ -929,6 +1210,8 @@ function handleFileImport(event) {
             scene.add(currentGroup);
 
             URL.revokeObjectURL(url);
+
+            notify(`Imported ${file.name}`);
         },
         undefined,
         (error) => {
@@ -940,4 +1223,615 @@ function handleFileImport(event) {
             URL.revokeObjectURL(url);
         }
     );
+
+    event.target.value = "";
+}
+
+/* =====================================================
+   MULTI-PART STL IMPORT
+   Every selected file becomes its own named, selectable
+   part in the same scene — layer as many as you like.
+===================================================== */
+
+function handleStlImport(event) {
+
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    ensureRenderer();
+    resizeViewer();
+
+    // demo scenes / GLTF live in a different "mode" — starting a
+    // multi-part STL session clears them, but NOT previously loaded parts
+    if (currentGroup) {
+
+        disposeGroup(currentGroup);
+        scene.remove(currentGroup);
+        currentGroup = null;
+        currentUpdate = null;
+    }
+
+    const loader = new STLLoader();
+    const colors = [0x00c8c8, 0xff9933, 0x9966ff, 0x4dffb8, 0xff5588, 0xffcc44];
+
+    files.forEach((file, i) => {
+
+        const url = URL.createObjectURL(file);
+
+        loader.load(
+            url,
+            (geometry) => {
+
+                geometry.computeVertexNormals();
+                geometry.center();
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: colors[(nextPartId + i) % colors.length],
+                    roughness: 0.5,
+                    metalness: 0.15,
+                    wireframe: wireframeOn
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+
+                // stagger multiple parts so they don't all land exactly on top of each other
+                mesh.position.x = (parts.length % 4) * 0.02;
+
+                scene.add(mesh);
+
+                const name = file.name.replace(/\.stl$/i, "");
+
+                addPart({ name, mesh });
+
+                URL.revokeObjectURL(url);
+            },
+            undefined,
+            (error) => {
+
+                console.error("STL load error:", error);
+                notify(`Failed to load ${file.name}`);
+                URL.revokeObjectURL(url);
+            }
+        );
+    });
+
+    event.target.value = "";
+}
+
+function addPart({ name, mesh }) {
+
+    const part = { id: nextPartId++, name, mesh, visible: true };
+
+    parts.push(part);
+    renderOutliner();
+
+    addSystemLog(`3D Viewer: loaded part "${name}"`);
+}
+
+function clearAllParts() {
+
+    parts.forEach(p => {
+
+        scene?.remove(p.mesh);
+
+        if (p.mesh.geometry) p.mesh.geometry.dispose();
+        if (p.mesh.material) p.mesh.material.dispose();
+    });
+
+    parts = [];
+    deselectPart();
+    renderOutliner();
+}
+
+/* =====================================================
+   OUTLINER (part list — select / show-hide / delete)
+===================================================== */
+
+function renderOutliner() {
+
+    const container = document.getElementById("partsOutliner");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (!parts.length) {
+
+        container.innerHTML = `<div class="viewerHint">No parts loaded yet.</div>`;
+        return;
+    }
+
+    parts.forEach(part => {
+
+        const row = document.createElement("div");
+        row.className = `outlinerRow${part === selectedPart ? " selected" : ""}${part.visible ? "" : " hiddenPart"}`;
+
+        const name = document.createElement("span");
+        name.className = "outlinerRowName";
+        name.textContent = part.name;
+        name.addEventListener("click", () => selectPart(part));
+
+        const visBtn = document.createElement("button");
+        visBtn.className = "outlinerVisBtn";
+        visBtn.textContent = part.visible ? "👁" : "🚫";
+        visBtn.title = "Toggle visibility";
+        visBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setPartVisible(part, !part.visible);
+        });
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "outlinerDeleteBtn";
+        deleteBtn.textContent = "✕";
+        deleteBtn.title = "Delete part";
+        deleteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deletePart(part);
+        });
+
+        row.appendChild(name);
+        row.appendChild(visBtn);
+        row.appendChild(deleteBtn);
+
+        container.appendChild(row);
+    });
+}
+
+function setPartVisible(part, visible) {
+
+    part.visible = visible;
+    part.mesh.visible = visible;
+
+    renderOutliner();
+}
+
+function deletePart(part) {
+
+    scene?.remove(part.mesh);
+
+    if (part.mesh.geometry) part.mesh.geometry.dispose();
+    if (part.mesh.material) part.mesh.material.dispose();
+
+    parts = parts.filter(p => p !== part);
+
+    if (selectedPart === part) deselectPart();
+
+    renderOutliner();
+}
+
+/* =====================================================
+   SELECTION (click, gesture, or voice — same code path)
+===================================================== */
+
+function handleViewerClick(event) {
+
+    if (justFinishedDragging) {
+        justFinishedDragging = false;
+        return;
+    }
+
+    if (!parts.length) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    const meshes = parts.filter(p => p.visible).map(p => p.mesh);
+    const hits = raycaster.intersectObjects(meshes);
+
+    if (!hits.length) return;
+
+    const part = parts.find(p => p.mesh === hits[0].object);
+    if (part) selectPart(part);
+}
+
+function selectPart(part) {
+
+    if (selectedPart) unhighlightPart(selectedPart);
+
+    selectedPart = part;
+    highlightPart(part);
+
+    transformControls.attach(part.mesh);
+
+    updateInfoBox(part);
+    renderOutliner();
+}
+
+export function selectPartByName(query) {
+
+    if (!parts.length) return false;
+
+    const match = fuzzyFindPart(query);
+    if (!match) return false;
+
+    if (!match.visible) setPartVisible(match, true);
+
+    selectPart(match);
+    notify(`Selected "${match.name}"`);
+    return true;
+}
+
+export function hidePartByName(query) {
+
+    const match = fuzzyFindPart(query);
+    if (!match) return false;
+
+    setPartVisible(match, false);
+    if (selectedPart === match) deselectPart();
+
+    notify(`Hid "${match.name}"`);
+    return true;
+}
+
+export function showPartByName(query) {
+
+    const match = fuzzyFindPart(query);
+    if (!match) return false;
+
+    setPartVisible(match, true);
+    notify(`Showing "${match.name}"`);
+    return true;
+}
+
+export function showAllParts() {
+
+    parts.forEach(p => setPartVisible(p, true));
+    notify("All parts visible");
+}
+
+function fuzzyFindPart(query) {
+
+    if (!query) return null;
+
+    const normalized = query.toLowerCase().trim();
+
+    let best = null;
+    let bestScore = 0;
+
+    parts.forEach(part => {
+
+        const name = part.name.toLowerCase();
+
+        let score = 0;
+
+        if (name === normalized) score = 100;
+        else if (name.includes(normalized) || normalized.includes(name)) score = 60;
+        else {
+
+            const queryWords = normalized.split(/\s+/);
+            const nameWords = name.split(/[\s_-]+/);
+
+            score = queryWords.filter(w => nameWords.some(nw => nw.includes(w) || w.includes(nw))).length * 20;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            best = part;
+        }
+    });
+
+    return bestScore > 0 ? best : null;
+}
+
+function deselectPart() {
+
+    if (selectedPart) unhighlightPart(selectedPart);
+
+    selectedPart = null;
+    transformControls.detach();
+
+    document.getElementById("viewerInfoBox")?.classList.add("hidden");
+    renderOutliner();
+}
+
+function highlightPart(part) {
+
+    const materials = Array.isArray(part.mesh.material) ? part.mesh.material : [part.mesh.material];
+
+    materials.forEach(m => {
+        part.mesh.userData._origEmissive = m.emissive?.getHex();
+        m.emissive?.setHex(0x00ffff);
+    });
+}
+
+function unhighlightPart(part) {
+
+    const materials = Array.isArray(part.mesh.material) ? part.mesh.material : [part.mesh.material];
+
+    materials.forEach(m => {
+        if (part.mesh.userData._origEmissive !== undefined) {
+            m.emissive?.setHex(part.mesh.userData._origEmissive);
+        }
+    });
+}
+
+function updateInfoBox(part) {
+
+    const box = document.getElementById("viewerInfoBox");
+    if (!box) return;
+
+    box.classList.remove("hidden");
+
+    const bbox = new THREE.Box3().setFromObject(part.mesh);
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+
+    const triCount = part.mesh.geometry.index
+        ? part.mesh.geometry.index.count / 3
+        : part.mesh.geometry.attributes.position.count / 3;
+
+    document.getElementById("viewerInfoName").textContent = part.name;
+    document.getElementById("viewerInfoDims").textContent =
+        `Size: ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)}`;
+    document.getElementById("viewerInfoTris").textContent =
+        `Triangles: ${Math.round(triCount).toLocaleString()}`;
+}
+
+/* =====================================================
+   HAND GESTURE CONTROL
+   Reuses the same MediaPipe tracker as the Camera panel,
+   but with its own independent webcam feed so the two
+   panels don't have to be open together.
+===================================================== */
+
+async function toggleGestureControl(enabled) {
+
+    gestureEnabled = enabled;
+
+    if (!enabled) {
+
+        gestureStream?.getTracks().forEach(t => t.stop());
+        gestureStream = null;
+
+        document.getElementById("viewerGestureReadout")?.classList.add("hidden");
+        return;
+    }
+
+    try {
+
+        gestureVideo = document.createElement("video");
+        gestureVideo.playsInline = true;
+        gestureVideo.muted = true;
+
+        gestureStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        gestureVideo.srcObject = gestureStream;
+        await gestureVideo.play();
+
+        await startHandTracking(gestureVideo);
+
+        onHandResult(handleGestureResults);
+
+        document.getElementById("viewerGestureReadout")?.classList.remove("hidden");
+        notify("Gesture control active — pinch to orbit, fist to select, open palm to deselect");
+        addSystemLog("3D Viewer: gesture control enabled");
+
+    } catch (err) {
+
+        console.error(err);
+        notify("Couldn't access the camera for gesture control");
+
+        const toggle = document.getElementById("gestureControlToggle");
+        if (toggle) toggle.checked = false;
+
+        gestureEnabled = false;
+    }
+}
+
+function handleGestureResults(hands) {
+
+    if (!gestureEnabled || !hands.length) {
+
+        gestureDragOrigin = null;
+        gestureOrbitState = null;
+        return;
+    }
+
+    const hand = hands[0];
+    const handId = hand.handedness;
+
+    const readout = document.getElementById("viewerGestureReadout");
+    if (readout) readout.textContent = `${handId}: ${hand.gesture.replace("_", " ").toUpperCase()}`;
+
+    const prevGesture = lastGestureByHand[handId];
+
+    // edge-triggered actions (fire once per transition, not every frame)
+    if (hand.gesture === "fist" && prevGesture !== "fist") {
+
+        raycastFromCenter();
+    }
+
+    if (hand.gesture === "open_palm" && prevGesture !== "open_palm") {
+
+        deselectPart();
+    }
+
+    // continuous drag/orbit while pinching
+    if (hand.gesture === "pinch") {
+
+        const center = { x: hand.landmarks[8].x, y: hand.landmarks[8].y };
+
+        if (!gestureDragOrigin) {
+
+            gestureDragOrigin = center;
+
+        } else {
+
+            const dx = center.x - gestureDragOrigin.x;
+            const dy = center.y - gestureDragOrigin.y;
+
+            if (selectedPart) {
+
+                selectedPart.mesh.position.x += dx * 3;
+                selectedPart.mesh.position.y -= dy * 3;
+
+            } else {
+
+                gestureOrbitState = { dx: dx * 4, dy: dy * 4 };
+            }
+
+            gestureDragOrigin = center;
+        }
+
+    } else {
+
+        gestureDragOrigin = null;
+    }
+
+    lastGestureByHand[handId] = hand.gesture;
+}
+
+function raycastFromCenter() {
+
+    if (!parts.length) return;
+
+    raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+
+    const meshes = parts.filter(p => p.visible).map(p => p.mesh);
+    const hits = raycaster.intersectObjects(meshes);
+
+    if (!hits.length) return;
+
+    const part = parts.find(p => p.mesh === hits[0].object);
+    if (part) selectPart(part);
+}
+
+function updateGestureOrbit() {
+
+    if (!gestureOrbitState || !controls) return;
+
+    const spherical = new THREE.Spherical().setFromVector3(
+        camera.position.clone().sub(controls.target)
+    );
+
+    spherical.theta -= gestureOrbitState.dx;
+    spherical.phi = THREE.MathUtils.clamp(spherical.phi - gestureOrbitState.dy, 0.1, Math.PI - 0.1);
+
+    camera.position.setFromSpherical(spherical).add(controls.target);
+    camera.lookAt(controls.target);
+
+    gestureOrbitState = null;
+}
+
+/* =====================================================
+   VOICE CONTROL (Web Speech API)
+===================================================== */
+
+function toggleVoiceControl(enabled) {
+
+    voiceEnabled = enabled;
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!enabled) {
+
+        recognition?.stop();
+        return;
+    }
+
+    if (!SpeechRecognition) {
+
+        notify("Voice recognition isn't supported in this browser (try Chrome or Edge)");
+
+        const toggle = document.getElementById("voiceControlToggle");
+        if (toggle) toggle.checked = false;
+
+        voiceEnabled = false;
+        return;
+    }
+
+    if (!recognition) {
+
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+
+        recognition.onresult = handleVoiceResult;
+
+        recognition.onerror = (event) => {
+            console.warn("Speech recognition error:", event.error);
+        };
+
+        recognition.onend = () => {
+            if (voiceEnabled) recognition.start(); // auto-restart while enabled
+        };
+    }
+
+    recognition.start();
+    addSystemLog("3D Viewer: voice control enabled");
+}
+
+function handleVoiceResult(event) {
+
+    let transcript = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+    }
+
+    const transcriptEl = document.getElementById("voiceTranscript");
+    if (transcriptEl) transcriptEl.textContent = transcript;
+
+    const isFinal = event.results[event.results.length - 1].isFinal;
+    if (!isFinal) return;
+
+    runVoiceCommand(transcript.trim().toLowerCase());
+}
+
+function runVoiceCommand(text) {
+
+    if (!text) return;
+
+    let match;
+
+    if ((match = text.match(/select (the )?(.+)/))) {
+
+        selectPartByName(match[2]);
+        return;
+    }
+
+    if (text.match(/show all|show everything/)) {
+
+        showAllParts();
+        return;
+    }
+
+    if ((match = text.match(/hide (the )?(.+)/))) {
+
+        hidePartByName(match[2]);
+        return;
+    }
+
+    if ((match = text.match(/show (the )?(.+)/))) {
+
+        showPartByName(match[2]);
+        return;
+    }
+
+    if (text.match(/deselect|unselect/)) {
+
+        deselectPart();
+        return;
+    }
+
+    if (text.match(/wireframe on/)) {
+
+        if (!wireframeOn) toggleWireframe();
+        return;
+    }
+
+    if (text.match(/wireframe off/)) {
+
+        if (wireframeOn) toggleWireframe();
+        return;
+    }
+
+    if (text.match(/reset( the)? view|reset camera/)) {
+
+        resetView();
+        return;
+    }
 }

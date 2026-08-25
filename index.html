@@ -255,12 +255,52 @@
 
         </div>
 
-        <video
-            id="cameraFeed"
-            autoplay
-            playsinline
-            muted>
-        </video>
+        <div id="cameraStage">
+
+            <video
+                id="cameraFeed"
+                autoplay
+                playsinline
+                muted>
+            </video>
+
+            <canvas id="cameraOverlay"></canvas>
+
+        </div>
+
+        <div id="cameraCapabilityBar">
+
+            <label class="cameraToggle">
+                <input type="checkbox" id="capObjects">
+                <span>Objects</span>
+            </label>
+
+            <label class="cameraToggle">
+                <input type="checkbox" id="capMotion">
+                <span>Motion</span>
+            </label>
+
+            <label class="cameraToggle">
+                <input type="checkbox" id="capFaces">
+                <span>Faces</span>
+            </label>
+
+            <label class="cameraToggle">
+                <input type="checkbox" id="capHands">
+                <span>Hand Gestures</span>
+            </label>
+
+            <span id="cameraModelStatus" class="cameraModelStatus"></span>
+
+        </div>
+
+        <div id="cameraFacePanel" class="hidden">
+
+            <input type="text" id="faceNameInput" placeholder="Name this face...">
+            <button id="enrollFaceBtn">ENROLL</button>
+            <div id="knownFacesList"></div>
+
+        </div>
 
     </div>
 
@@ -801,31 +841,112 @@
             ✕
         </button>
 
-        <canvas
-            id="viewerCanvas">
-        </canvas>
+        <div id="viewerStage">
+
+            <canvas id="viewerCanvas"></canvas>
+
+            <canvas id="viewerAxisGizmo"></canvas>
+
+            <div id="viewerToolbar">
+
+                <button id="toggleWireframe" title="Wireframe">WIRE</button>
+                <button id="toggleGrid" title="Grid">GRID</button>
+                <button id="cycleLighting" title="Lighting preset">LIGHT</button>
+                <button id="resetViewBtn" title="Reset view">RESET</button>
+            </div>
+
+            <div id="viewerInfoBox" class="hidden">
+
+                <div id="viewerInfoName">-</div>
+                <div id="viewerInfoDims">-</div>
+                <div id="viewerInfoTris">-</div>
+
+            </div>
+
+            <div id="viewerGestureReadout" class="hidden"></div>
+
+        </div>
 
         <div id="viewerSidebar">
 
-            <button id="loadSolar">
-                Solar System
-            </button>
+            <div class="viewerTabRow">
+                <button class="viewerTabBtn active" data-tab="scenes">SCENES</button>
+                <button class="viewerTabBtn" data-tab="import">IMPORT</button>
+                <button class="viewerTabBtn" data-tab="outliner">PARTS</button>
+                <button class="viewerTabBtn" data-tab="control">CONTROL</button>
+            </div>
 
-            <button id="loadEarth">
-                Earth
-            </button>
+            <div class="viewerTabPanel active" id="tabScenes">
 
-            <button id="loadMolecule">
-                Molecules
-            </button>
+                <button id="loadSolar">Solar System</button>
+                <button id="loadEarth">Earth</button>
+                <button id="loadMolecule">Molecules</button>
+                <button id="loadNeural">Neural Network</button>
 
-            <button id="loadNeural">
-                Neural Network
-            </button>
-            <button id="loadCustom">
-                Import Model
-            </button>
-            <input type="file" id="modelFile" accept=".glb,.gltf" style="display:none">
+            </div>
+
+            <div class="viewerTabPanel" id="tabImport">
+
+                <button id="loadCustom">Import glTF / GLB</button>
+                <input type="file" id="modelFile" accept=".glb,.gltf" style="display:none">
+
+                <button id="loadStlBtn">Import STL Part(s)</button>
+                <input type="file" id="stlFileInput" accept=".stl" multiple style="display:none">
+
+                <button id="clearPartsBtn">Clear All Parts</button>
+
+                <p class="viewerHint">
+                    Multiple STL files load together as separate, selectable
+                    parts in the same scene — great for multi-part models
+                    (helmet, visor, chestplate, etc).
+                </p>
+
+                <p class="viewerHint viewerWarnHint">
+                    .blend files can't be parsed in a browser — there's no
+                    reliable library for Blender's binary format. Export from
+                    Blender as glTF/GLB (File → Export → glTF 2.0) and import
+                    that instead; it'll come through fully intact.
+                </p>
+
+            </div>
+
+            <div class="viewerTabPanel" id="tabOutliner">
+
+                <div id="partsOutliner">
+                    <div class="viewerHint">No parts loaded yet.</div>
+                </div>
+
+            </div>
+
+            <div class="viewerTabPanel" id="tabControl">
+
+                <label class="viewerToggle">
+                    <input type="checkbox" id="gestureControlToggle">
+                    <span>Hand Gesture Control</span>
+                </label>
+
+                <p class="viewerHint">
+                    Pinch + move = orbit camera (or drag the selected part).
+                    Fist = select what's under the crosshair. Open palm =
+                    deselect. Uses your camera — the same tracker as the
+                    Camera panel.
+                </p>
+
+                <label class="viewerToggle">
+                    <input type="checkbox" id="voiceControlToggle">
+                    <span>Voice Commands</span>
+                </label>
+
+                <p class="viewerHint">
+                    Try: "select the &lt;part name&gt;", "hide/show &lt;part
+                    name&gt;", "show all", "deselect", "wireframe on/off",
+                    "reset view".
+                </p>
+
+                <div id="voiceTranscript" class="viewerHint"></div>
+
+            </div>
+
         </div>
 
     </div>

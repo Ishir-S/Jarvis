@@ -34,9 +34,10 @@ import {
 } from "./ui.js";
 
 import { initCamera, stopCamera } from "./camera.js";
+import { initCameraAI } from "./cameraAI.js";
 import { initChat, refreshChatPanel } from "./chat.js";
 import { initProjects, refreshEditor } from "./projects.js";
-import { initViewer, loadSceneByName } from "./viewer.js";
+import { initViewer, loadSceneByName, selectPartByName, hidePartByName, showPartByName, showAllParts } from "./viewer.js";
 import { initMap, refreshMap, searchRoute } from "./map.js";
 import { initResearch, refreshResearchPanel, startResearchOnTopic } from "./research.js";
 import { initASA, refreshASAPanel, beginAnalysisOnGoal } from "./asa.js";
@@ -65,6 +66,7 @@ async function init() {
     registerActionCommands();
 
     initChat();
+    initCameraAI();
     initProjects();
     initViewer();
     initMap();
@@ -169,6 +171,20 @@ function registerActionCommands() {
         open_viewer: (params) => {
             openViewerCommand();
             if (params.scene) setTimeout(() => loadSceneByName(params.scene), 350);
+        },
+
+        viewer_select_part: (params) => {
+            openViewerCommand();
+            if (params.name) setTimeout(() => selectPartByName(params.name), 350);
+        },
+
+        viewer_hide_part: (params) => {
+            if (params.name) hidePartByName(params.name);
+        },
+
+        viewer_show_part: (params) => {
+            if (params.name) showPartByName(params.name);
+            else showAllParts();
         },
 
         open_map: (params) => {

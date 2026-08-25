@@ -2,6 +2,8 @@
    JARVIS - CAMERA MODULE
 ===================================================== */
 
+import { stopCameraAI } from "./cameraAI.js";
+
 let stream = null;
 
 export async function initCamera() {
@@ -51,6 +53,8 @@ export async function initCamera() {
 export function stopCamera() {
 
     if (!stream) return;
+
+    stopCameraAI();
 
     stream.getTracks()
         .forEach(track => track.stop());

@@ -3357,3 +3357,559 @@ body{
 
     transform:translateX(-50%) translateY(12px);
 }
+
+/* ==========================================
+   CAMERA AI CAPABILITIES
+   ========================================== */
+
+#cameraStage{
+
+    position:relative;
+
+    width:100%;
+
+    height:calc(100% - 60px - 110px);
+}
+
+#cameraFeed{
+
+    width:100%;
+
+    height:100%;
+
+    object-fit:cover;
+
+    display:block;
+}
+
+#cameraOverlay{
+
+    position:absolute;
+
+    left:0;
+
+    top:0;
+
+    width:100%;
+
+    height:100%;
+
+    pointer-events:none;
+}
+
+#cameraCapabilityBar{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    align-items:center;
+
+    gap:16px;
+
+    padding:12px 15px;
+
+    border-top:1px solid rgba(0,255,255,.15);
+
+    font-size:.78rem;
+}
+
+.cameraToggle{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:6px;
+
+    color:rgba(216,255,255,.85);
+
+    cursor:pointer;
+}
+
+.cameraToggle input[type="checkbox"]{
+
+    width:14px;
+
+    height:14px;
+
+    accent-color:cyan;
+
+    cursor:pointer;
+}
+
+.cameraModelStatus{
+
+    color:rgba(216,255,255,.55);
+
+    font-size:.7rem;
+
+    margin-left:auto;
+}
+
+#cameraFacePanel{
+
+    display:flex;
+
+    gap:8px;
+
+    align-items:center;
+
+    padding:10px 15px;
+
+    border-top:1px solid rgba(0,255,255,.12);
+
+    flex-wrap:wrap;
+}
+
+#cameraFacePanel.hidden{
+
+    display:none;
+}
+
+#faceNameInput{
+
+    flex:1;
+
+    min-width:140px;
+
+    background:rgba(0,0,0,.4);
+
+    border:1px solid rgba(0,255,255,.3);
+
+    color:var(--text);
+
+    padding:7px 10px;
+
+    font-family:'Orbitron',sans-serif;
+
+    font-size:.72rem;
+
+    outline:none;
+}
+
+#enrollFaceBtn{
+
+    border:1px solid cyan;
+
+    background:rgba(0,255,255,.1);
+
+    color:cyan;
+
+    font-family:'Orbitron',sans-serif;
+
+    padding:7px 14px;
+
+    cursor:pointer;
+
+    font-size:.7rem;
+
+    transition:.2s;
+}
+
+#enrollFaceBtn:hover{
+
+    background:cyan;
+
+    color:black;
+}
+
+#knownFacesList{
+
+    display:flex;
+
+    gap:8px;
+
+    flex-wrap:wrap;
+}
+
+.cameraFaceRow{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:6px;
+
+    background:rgba(0,255,255,.08);
+
+    border:1px solid rgba(0,255,255,.25);
+
+    padding:4px 8px;
+
+    font-size:.7rem;
+
+    color:cyan;
+}
+
+.cameraFaceRow button{
+
+    background:none;
+
+    border:none;
+
+    color:var(--danger);
+
+    cursor:pointer;
+
+    font-size:.75rem;
+}
+
+.cameraFaceMuted{
+
+    font-size:.7rem;
+
+    color:rgba(216,255,255,.5);
+}
+
+/* ==========================================
+   3D VIEWER — PROFESSIONAL UPGRADE
+   ========================================== */
+
+#viewerStage{
+
+    position:absolute;
+
+    left:0;
+
+    top:0;
+
+    width:76%;
+
+    height:100%;
+}
+
+#viewerCanvas{
+
+    position:absolute;
+
+    inset:0;
+
+    width:100%;
+
+    height:100%;
+}
+
+#viewerAxisGizmo{
+
+    position:absolute;
+
+    top:15px;
+
+    left:15px;
+
+    width:90px;
+
+    height:90px;
+
+    pointer-events:none;
+}
+
+#viewerSidebar{
+
+    width:24%;
+}
+
+#viewerToolbar{
+
+    position:absolute;
+
+    top:15px;
+
+    right:15px;
+
+    display:flex;
+
+    gap:8px;
+
+    z-index:5;
+}
+
+#viewerToolbar button{
+
+    border:1px solid rgba(0,255,255,.4);
+
+    background:rgba(0,0,0,.5);
+
+    backdrop-filter:blur(6px);
+
+    color:cyan;
+
+    font-family:'Orbitron',sans-serif;
+
+    font-size:.68rem;
+
+    padding:8px 10px;
+
+    cursor:pointer;
+
+    transition:.2s;
+}
+
+#viewerToolbar button:hover,
+#viewerToolbar button.active{
+
+    background:rgba(0,255,255,.2);
+
+    box-shadow:0 0 12px rgba(0,255,255,.3);
+}
+
+#viewerInfoBox{
+
+    position:absolute;
+
+    bottom:15px;
+
+    left:15px;
+
+    background:rgba(0,0,0,.6);
+
+    backdrop-filter:blur(6px);
+
+    border:1px solid rgba(0,255,255,.3);
+
+    padding:10px 14px;
+
+    font-size:.72rem;
+
+    color:rgba(216,255,255,.9);
+
+    line-height:1.6;
+
+    min-width:180px;
+}
+
+#viewerInfoBox.hidden{
+
+    display:none;
+}
+
+#viewerInfoName{
+
+    color:cyan;
+
+    font-family:'Orbitron',sans-serif;
+
+    margin-bottom:4px;
+}
+
+#viewerGestureReadout{
+
+    position:absolute;
+
+    bottom:15px;
+
+    right:15px;
+
+    background:rgba(0,0,0,.6);
+
+    backdrop-filter:blur(6px);
+
+    border:1px solid rgba(0,255,255,.3);
+
+    padding:8px 14px;
+
+    font-size:.75rem;
+
+    color:cyan;
+
+    font-family:'Orbitron',sans-serif;
+}
+
+#viewerGestureReadout.hidden{
+
+    display:none;
+}
+
+.viewerTabRow{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    gap:4px;
+
+    margin-bottom:14px;
+}
+
+.viewerTabBtn{
+
+    flex:1;
+
+    min-width:60px;
+
+    border:1px solid rgba(0,255,255,.3);
+
+    background:transparent;
+
+    color:rgba(216,255,255,.7);
+
+    font-family:'Orbitron',sans-serif;
+
+    font-size:.65rem;
+
+    padding:8px 4px;
+
+    cursor:pointer;
+
+    transition:.2s;
+}
+
+.viewerTabBtn.active{
+
+    background:rgba(0,255,255,.15);
+
+    color:cyan;
+
+    border-color:cyan;
+}
+
+.viewerTabPanel{
+
+    display:none;
+
+    flex-direction:column;
+
+    gap:10px;
+}
+
+.viewerTabPanel.active{
+
+    display:flex;
+}
+
+.viewerHint{
+
+    font-size:.68rem;
+
+    line-height:1.5;
+
+    color:rgba(216,255,255,.55);
+}
+
+.viewerWarnHint{
+
+    color:rgba(255,180,84,.75);
+
+    border-left:2px solid #ffb454;
+
+    padding-left:8px;
+}
+
+.viewerToggle{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:8px;
+
+    font-size:.78rem;
+
+    color:rgba(216,255,255,.85);
+
+    cursor:pointer;
+}
+
+.viewerToggle input[type="checkbox"]{
+
+    width:15px;
+
+    height:15px;
+
+    accent-color:cyan;
+
+    cursor:pointer;
+}
+
+#voiceTranscript{
+
+    background:rgba(0,255,255,.05);
+
+    border:1px solid rgba(0,255,255,.15);
+
+    padding:8px;
+
+    min-height:40px;
+}
+
+#partsOutliner{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:6px;
+
+    max-height:70vh;
+
+    overflow-y:auto;
+}
+
+.outlinerRow{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:8px;
+
+    background:rgba(0,255,255,.05);
+
+    border:1px solid rgba(0,255,255,.15);
+
+    padding:8px 10px;
+
+    font-size:.75rem;
+
+    color:rgba(216,255,255,.85);
+
+    cursor:pointer;
+
+    transition:.2s;
+}
+
+.outlinerRow:hover,
+.outlinerRow.selected{
+
+    background:rgba(0,255,255,.15);
+
+    border-color:cyan;
+}
+
+.outlinerRowName{
+
+    flex:1;
+
+    overflow:hidden;
+
+    text-overflow:ellipsis;
+
+    white-space:nowrap;
+}
+
+.outlinerVisBtn,
+.outlinerDeleteBtn{
+
+    background:none;
+
+    border:none;
+
+    color:cyan;
+
+    cursor:pointer;
+
+    font-size:.85rem;
+
+    flex-shrink:0;
+}
+
+.outlinerDeleteBtn{
+
+    color:var(--danger);
+}
+
+.outlinerRow.hiddenPart{
+
+    opacity:.4;
+}
