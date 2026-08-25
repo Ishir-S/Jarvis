@@ -43,9 +43,10 @@ import { initResearch, refreshResearchPanel, startResearchOnTopic } from "./rese
 import { initASA, refreshASAPanel, beginAnalysisOnGoal } from "./asa.js";
 import { initPhysics, refreshPhysicsPanel, spawnByName, setGravity } from "./physics.js";
 import { registerCommands } from "./commandBridge.js";
+import { initVoiceEngine, toggleVoice } from "./voiceEngine.js";
+import { initProactiveIntelligence, feedTelemetry } from "./proactiveIntelligence.js";
 
 let buttons;
-let voiceActive = false;
 
 const startTime = Date.now();
 
@@ -66,13 +67,22 @@ async function init() {
     registerActionCommands();
 
     initChat();
-    initCameraAI();
     initProjects();
     initViewer();
     initMap();
     initResearch();
     initASA();
     initPhysics();
+
+    // Auto-start continuous camera & all AI vision features from boot
+    await initCamera();
+    await initCameraAI();
+
+    // Auto-start continuous voice engine with 'jarvis' wakeword from boot
+    initVoiceEngine();
+
+    // Engage proactive unprompted speech intelligence
+    initProactiveIntelligence();
 
     document.addEventListener("camera-status", (event) => {
         setCameraStatus(event.detail);
@@ -82,7 +92,7 @@ async function init() {
     startTelemetryLoop();
 
     notify("Welcome Back");
-    addSystemLog("JARVIS initialized");
+    addSystemLog("JARVIS initialized — Visual and Audio arrays online");
     playAudio("startupAudio");
 
     console.log("%cJARVIS ONLINE", "color:cyan;font-size:18px");
@@ -287,13 +297,7 @@ function openPhysicsCommand() {
 
 function toggleVoiceCommand() {
 
-    voiceActive = !voiceActive;
-
-    setVoiceStatus(voiceActive ? "Listening..." : "Standby");
-
-    notify(voiceActive ? "Voice Engine Activated" : "Voice Engine Standby");
-
-    addSystemLog(voiceActive ? "Voice engine activated" : "Voice engine deactivated");
+    toggleVoice();
 }
 
 function closeAllWindows() {
@@ -308,7 +312,8 @@ function closeAllWindows() {
     closeWindow("asaPanel");
     closeWindow("physicsPanel");
 
-    stopCamera();
+    // Camera and Voice stay alive in the background
+    stopCamera(false);
     zoomOut();
 
     notify("Windows Closed");
@@ -341,6 +346,7 @@ function startTelemetryLoop() {
             Math.floor((Date.now() - startTime) / 1000);
 
         updateTelemetry({ fps, memory, threads, uptimeSec });
+        feedTelemetry({ fps, memory, threads, uptimeSec });
 
     }, 1000);
 }

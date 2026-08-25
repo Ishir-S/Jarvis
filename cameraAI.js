@@ -8,9 +8,10 @@
 
 import { addSystemLog } from "./ui.js";
 import { startHandTracking, stopHandTracking, onHandResult, drawHandSkeleton } from "./handTracking.js";
+import { feedVisualEvent } from "./proactiveIntelligence.js";
 
 const FACE_MODEL_BASE =
-    "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+    "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/";
 
 const KNOWN_FACES_KEY = "jarvis_known_faces";
 
@@ -29,10 +30,10 @@ let lastFaceResults = [];
 let prevMotionFrame = null;
 
 let state = {
-    objects: false,
-    motion: false,
-    faces: false,
-    hands: false
+    objects: true,
+    motion: true,
+    faces: true,
+    hands: true
 };
 
 let latestHandResults = [];
@@ -42,7 +43,7 @@ let unsubscribeHands = null;
    INIT
 ===================================================== */
 
-export function initCameraAI() {
+export async function initCameraAI() {
 
     video = document.getElementById("cameraFeed");
     overlay = document.getElementById("cameraOverlay");
@@ -51,16 +52,57 @@ export function initCameraAI() {
 
     ctx = overlay.getContext("2d");
 
-    document.getElementById("capObjects")?.addEventListener("change", (e) => toggleCapability("objects", e.target.checked));
-    document.getElementById("capMotion")?.addEventListener("change", (e) => toggleCapability("motion", e.target.checked));
-    document.getElementById("capFaces")?.addEventListener("change", (e) => toggleCapability("faces", e.target.checked));
-    document.getElementById("capHands")?.addEventListener("change", (e) => toggleCapability("hands", e.target.checked));
+    const capObjects = document.getElementById("capObjects");
+    const capMotion = document.getElementById("capMotion");
+    const capFaces = document.getElementById("capFaces");
+    const capHands = document.getElementById("capHands");
+
+    if (capObjects) capObjects.checked = true;
+    if (capMotion) capMotion.checked = true;
+    if (capFaces) capFaces.checked = true;
+    if (capHands) capHands.checked = true;
+
+    capObjects?.addEventListener("change", (e) => toggleCapability("objects", e.target.checked));
+    capMotion?.addEventListener("change", (e) => toggleCapability("motion", e.target.checked));
+    capFaces?.addEventListener("change", (e) => toggleCapability("faces", e.target.checked));
+    capHands?.addEventListener("change", (e) => toggleCapability("hands", e.target.checked));
 
     document.getElementById("enrollFaceBtn")?.addEventListener("click", handleEnrollFace);
 
     renderKnownFaces();
 
     window.addEventListener("resize", resizeOverlay);
+
+    video.addEventListener("loadeddata", () => {
+        resizeOverlay();
+        ensureLoop();
+    });
+    video.addEventListener("play", () => {
+        resizeOverlay();
+        ensureLoop();
+    });
+
+    // Auto-enable all capabilities from boot
+    await enableAllCapabilities();
+}
+
+export function ensureCameraAIRunning() {
+    resizeOverlay();
+    ensureLoop();
+}
+
+async function enableAllCapabilities() {
+    resizeOverlay();
+    ensureLoop();
+
+    const promises = [
+        toggleCapability("objects", true),
+        toggleCapability("motion", true),
+        toggleCapability("faces", true),
+        toggleCapability("hands", true)
+    ];
+
+    await Promise.allSettled(promises);
 }
 
 function setModelStatus(text) {
@@ -191,7 +233,8 @@ async function ensureFaceApi() {
 
         faceApiLoading = (async () => {
 
-            await loadScript("https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js");
+            await loadScript("https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js");
+            await loadScript("https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js");
 
             await Promise.all([
                 window.faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_BASE),
@@ -297,6 +340,10 @@ function runMotionDetection() {
             ctx.font = "14px Orbitron";
             ctx.fillStyle = "#ff5050";
             ctx.fillText(`MOTION DETECTED (${motionCells.length} regions)`, 10, 20);
+
+            if (motionCells.length > 15) {
+                feedVisualEvent("high_motion");
+            }
         }
     }
 
@@ -313,7 +360,7 @@ async function runObjectDetectionThrottled() {
     if (now - lastObjectDetectAt < 400) return;
     lastObjectDetectAt = now;
 
-    if (!cocoModel) return;
+    if (!cocoModel || !video || video.readyState < 2 || !video.videoWidth) return;
 
     try {
 
@@ -321,13 +368,13 @@ async function runObjectDetectionThrottled() {
 
     } catch (err) {
 
-        console.error("Object detection error:", err);
+        console.warn("Object detection warning:", err.message);
     }
 }
 
 function drawObjectBoxes() {
 
-    if (!state.objects) return;
+    if (!state.objects || !video.videoWidth) return;
 
     const scaleX = overlay.width / video.videoWidth;
     const scaleY = overlay.height / video.videoHeight;
@@ -363,7 +410,7 @@ async function runFaceDetectionThrottled() {
     if (now - lastFaceDetectAt < 500) return;
     lastFaceDetectAt = now;
 
-    if (!window.faceapi?._jarvisModelsLoaded) return;
+    if (!window.faceapi?._jarvisModelsLoaded || !video || video.readyState < 2 || !video.videoWidth) return;
 
     try {
 
@@ -378,9 +425,18 @@ async function runFaceDetectionThrottled() {
             match: matchKnownFace(d.descriptor)
         }));
 
+        if (lastFaceResults.length > 0) {
+            const firstMatch = lastFaceResults.find(f => f.match);
+            if (firstMatch) {
+                feedVisualEvent("face_recognized", { label: firstMatch.match.label });
+            } else {
+                feedVisualEvent("unknown_face");
+            }
+        }
+
     } catch (err) {
 
-        console.error("Face detection error:", err);
+        console.warn("Face detection warning:", err.message);
     }
 }
 
@@ -549,6 +605,22 @@ function drawHands() {
             wrist.x * overlay.width,
             wrist.y * overlay.height + 20
         );
+
+        // Map index fingertip to screen ghost cursor
+        const ghostCursor = document.getElementById("ghostCursor");
+        if (ghostCursor && hand.landmarks && hand.landmarks[8]) {
+            const screenX = (1 - hand.landmarks[8].x) * window.innerWidth;
+            const screenY = hand.landmarks[8].y * window.innerHeight;
+            ghostCursor.style.display = "block";
+            ghostCursor.style.left = `${screenX}px`;
+            ghostCursor.style.top = `${screenY}px`;
+
+            if (hand.gesture === "pinch" || hand.gesture === "fist") {
+                ghostCursor.style.transform = "translate(-50%, -50%) scale(1.3)";
+            } else {
+                ghostCursor.style.transform = "translate(-50%, -50%) scale(1)";
+            }
+        }
     });
 }
 

@@ -299,18 +299,36 @@ function buildSystemPrompt(actionTaken) {
    RESPONSE HANDLING
 ===================================================== */
 
+export async function sendVoiceMessage(text, { speakBack = true } = {}) {
+    const messages = document.getElementById("chatMessages");
+    if (!messages || !text) return;
+
+    appendMessage(messages, text, "user-message");
+    addSystemLog(`Voice chat: ${text}`);
+
+    const reply = await respond(messages, text);
+    if (speakBack && reply) {
+        try {
+            const { speak } = await import("./voiceEngine.js");
+            speak(reply);
+        } catch (e) {
+            console.warn("Failed to speak reply:", e);
+        }
+    }
+    return reply;
+}
+
 async function respond(messages, text) {
 
     if (!ollamaAvailable) {
 
-        setTimeout(() => {
-
-            const reply = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
-            appendMessage(messages, reply, "bot-message");
-
-        }, 500);
-
-        return;
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                const reply = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
+                appendMessage(messages, reply, "bot-message");
+                resolve(reply);
+            }, 500);
+        });
     }
 
     history.push({ role: "user", content: text });
@@ -343,6 +361,7 @@ async function respond(messages, text) {
         memory.saveHistory(history);
 
         maybeUpdateLongTermMemory();
+        return full;
 
     } catch (err) {
 
@@ -352,6 +371,7 @@ async function respond(messages, text) {
         bubble.textContent = "Local AI request failed — falling back to standby mode. Check the connection bar above.";
 
         ollamaAvailable = false;
+        return "Local AI request failed. Standing by.";
     }
 }
 

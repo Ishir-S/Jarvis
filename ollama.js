@@ -63,11 +63,20 @@ export async function checkStatus(host = settings.host) {
 
     try {
 
-        const res = await fetch(`${host}/api/tags`, {
-            method: "GET"
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetch(`${host}/api/tags`, {
+            method: "GET",
+            signal: controller.signal
+        }).catch(() => null);
+
+        clearTimeout(timeoutId);
+
+        if (!res || !res.ok) {
+            emitStatus({ connected: false, error: "Ollama offline", models: [] });
+            return { connected: false, error: "Ollama offline", models: [] };
+        }
 
         const data = await res.json();
 

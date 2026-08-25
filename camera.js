@@ -1,31 +1,49 @@
 /* =====================================================
-   JARVIS - CAMERA MODULE
+   JARVIS - CAMERA MODULE (Continuous Live Video)
 ===================================================== */
 
-import { stopCameraAI } from "./cameraAI.js";
+import { stopCameraAI, ensureCameraAIRunning } from "./cameraAI.js";
 
 let stream = null;
+let cameraStarting = false;
 
 export async function initCamera() {
 
-    const video =
-        document.getElementById(
-            "cameraFeed"
-        );
-
+    const video = document.getElementById("cameraFeed");
     if (!video) return;
 
-    if (stream) return; // already running
+    if (stream && stream.active) {
+        if (video.srcObject !== stream) {
+            video.srcObject = stream;
+            video.play().catch(() => {});
+        }
+        ensureCameraAIRunning();
+        return;
+    }
+
+    if (cameraStarting) return;
+    cameraStarting = true;
 
     try {
 
-        stream =
-            await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: false
-            });
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: "user"
+            },
+            audio: false
+        });
 
         video.srcObject = stream;
+        video.setAttribute("playsinline", "true");
+        video.setAttribute("autoplay", "true");
+        video.muted = true;
+
+        video.onloadedmetadata = () => {
+            video.play().catch(() => {});
+            ensureCameraAIRunning();
+        };
 
         document.dispatchEvent(
             new CustomEvent(
@@ -34,23 +52,37 @@ export async function initCamera() {
             )
         );
 
+        cameraStarting = false;
+
     } catch (err) {
 
-        console.error(
-            "Camera error:",
-            err
-        );
+        cameraStarting = false;
+        console.warn("Camera init pending user gesture or permission:", err.message);
 
         document.dispatchEvent(
             new CustomEvent(
                 "camera-status",
-                { detail: "Access Denied" }
+                { detail: "Standby" }
             )
         );
+
+        // Retry on first user interaction in case the browser blocks background getUserMedia
+        const retryOnGesture = () => {
+            if (!stream) {
+                initCamera();
+            }
+            window.removeEventListener("pointerdown", retryOnGesture);
+            window.removeEventListener("keydown", retryOnGesture);
+        };
+        window.addEventListener("pointerdown", retryOnGesture, { once: true });
+        window.addEventListener("keydown", retryOnGesture, { once: true });
     }
 }
 
-export function stopCamera() {
+export function stopCamera(force = false) {
+
+    // Keep camera live in the background unless explicitly forced to shut down
+    if (!force) return;
 
     if (!stream) return;
 
@@ -74,4 +106,8 @@ export function stopCamera() {
             { detail: "Offline" }
         )
     );
+}
+
+export function getCameraStream() {
+    return stream;
 }
