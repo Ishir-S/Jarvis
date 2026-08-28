@@ -6,6 +6,7 @@ import { addSystemLog, notify } from "./ui.js";
 import { getSettings, setSettings, checkStatus, chatStream, generateJSON } from "./ollama.js";
 import * as memory from "./memory.js";
 import { classifyAndExecuteIntent } from "./commander.js";
+import { sendAgentMessage, onBackendMessage, isBackendOnline, setBackendModel, fetchMemory, deleteMemoryFact } from "./backendBridge.js";
 
 const fallbackResponses = [
     "Command acknowledged.",
@@ -24,7 +25,7 @@ clever turn of phrase, but cleverness never gets in the way of being
 genuinely useful. When it helps someone understand something, you reach for
 an apt analogy or metaphor rather than a dry technical definition. You
 address the user warmly and personably — a light "sir" or similar is fine
-occasionally, but don't overdo it. You have a good memory for what's been
+occasionially, but don't overdo it. You have a good memory for what's been
 discussed and you weave past context in naturally, the way a trusted
 assistant would, rather than reciting it back mechanically. Keep responses
 concise unless real depth is asked for.`;
@@ -33,6 +34,7 @@ let history = memory.loadHistory();
 let ollamaAvailable = false;
 let userTurnsSinceLastMemoryUpdate = 0;
 let cachedWeatherBundle = null;
+let currentStreamingBubble = null;
 
 /* =====================================================
    INIT
@@ -47,6 +49,11 @@ export function initChat() {
     if (!input || !sendBtn || !messages) return;
 
     rehydrateMessageUI(messages);
+
+    // Setup backend streaming listener
+    onBackendMessage((msg) => {
+        handleBackendStreamEvent(messages, msg);
+    });
 
     const send = () => {
 
@@ -66,10 +73,21 @@ export function initChat() {
         if (event.key === "Enter") send();
     });
 
-    document.getElementById("chatOllamaRefresh")?.addEventListener("click", refreshChatConnection);
+    const saveApiKeyAndRefresh = () => {
+        const apiKeyInput = document.getElementById("grokApiKeyInput");
+        if (apiKeyInput && apiKeyInput.value.trim()) {
+            setSettings({ apiKey: apiKeyInput.value.trim() });
+        }
+        refreshChatConnection();
+    };
+
+    document.getElementById("chatOllamaRefresh")?.addEventListener("click", saveApiKeyAndRefresh);
+    document.getElementById("grokApiKeyInput")?.addEventListener("change", saveApiKeyAndRefresh);
 
     document.getElementById("chatModelSelect")?.addEventListener("change", (event) => {
-        setSettings({ model: event.target.value });
+        const val = event.target.value;
+        setSettings({ model: val });
+        setBackendModel(val);
     });
 
     // memory panel
@@ -142,51 +160,47 @@ async function refreshChatConnection() {
     const dot = document.getElementById("chatOllamaDot");
     const label = document.getElementById("chatOllamaLabel");
     const select = document.getElementById("chatModelSelect");
+    const apiKeyInput = document.getElementById("grokApiKeyInput");
 
-    if (label) label.textContent = "Checking local AI engine...";
+    const currentSettings = getSettings();
+    if (apiKeyInput && currentSettings.apiKey && !apiKeyInput.value) {
+        apiKeyInput.value = currentSettings.apiKey;
+    }
 
-    const { host } = getSettings();
-    const result = await checkStatus(host);
+    if (label) label.textContent = "Connecting to Grok API...";
 
-    ollamaAvailable = result.connected && result.models.length > 0;
+    const result = await checkStatus();
+
+    ollamaAvailable = result.connected;
 
     if (result.connected) {
 
         dot?.classList.add("connected");
 
         if (label) {
-            label.textContent = result.models.length ? "Local AI online" : "Connected, no models pulled";
+            label.textContent = "Grok API online";
         }
 
-        if (select) {
+        if (select && result.models.length) {
 
-            const current = getSettings().model;
             select.innerHTML = "";
 
-            if (result.models.length) {
+            result.models.forEach(name => {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            });
 
-                result.models.forEach(name => {
-                    const opt = document.createElement("option");
-                    opt.value = name;
-                    opt.textContent = name;
-                    select.appendChild(opt);
-                });
-
-                const useModel = result.models.includes(current) ? current : result.models[0];
-                select.value = useModel;
-                setSettings({ model: useModel });
-
-            } else {
-
-                select.innerHTML = `<option value="">No models found</option>`;
-            }
+            const useModel = result.models.includes(currentSettings.model) ? currentSettings.model : result.models[0];
+            select.value = useModel;
+            setSettings({ model: useModel });
         }
 
     } else {
 
         dot?.classList.remove("connected");
-        if (label) label.textContent = "Local AI offline (using canned replies)";
-        if (select) select.innerHTML = `<option value="">No models found</option>`;
+        if (label) label.textContent = result.error || "Grok API Key missing";
     }
 }
 
@@ -304,28 +318,78 @@ export async function sendVoiceMessage(text, { speakBack = true } = {}) {
     if (!messages || !text) return;
 
     appendMessage(messages, text, "user-message");
-    addSystemLog(`Voice chat: ${text}`);
+    addSystemLog(`Voice: "${text}"`);
 
-    const reply = await respond(messages, text);
-    if (speakBack && reply) {
-        try {
-            const { speak } = await import("./voiceEngine.js");
-            speak(reply);
-        } catch (e) {
-            console.warn("Failed to speak reply:", e);
-        }
-    }
+    const reply = await respond(messages, text, { speakBack });
     return reply;
 }
 
-async function respond(messages, text) {
+function handleBackendStreamEvent(messages, msg) {
+    if (msg.type === "token") {
+        if (!currentStreamingBubble) {
+            currentStreamingBubble = appendMessage(messages, "", "bot-message");
+            currentStreamingBubble.classList.add("streaming");
+        }
+        currentStreamingBubble.textContent = msg.full;
+        messages.scrollTop = messages.scrollHeight;
+    } else if (msg.type === "tool_call") {
+        const toolCard = document.createElement("div");
+        toolCard.className = "bot-tool-call";
+        toolCard.innerHTML = `<span class="tool-icon">⚡</span> <strong>Action:</strong> <code>${msg.tool}</code><br><small>${msg.thought || ""}</small>`;
+        messages.appendChild(toolCard);
+        messages.scrollTop = messages.scrollHeight;
+    } else if (msg.type === "tool_result") {
+        const resultCard = document.createElement("div");
+        resultCard.className = `bot-tool-result ${msg.result?.success ? "success" : "failure"}`;
+        resultCard.innerHTML = `<span class="result-badge">${msg.result?.success ? "✓" : "✕"}</span> <code>${msg.tool}</code>: ${msg.result?.message || (msg.result?.success ? "Execution successful" : (msg.result?.error || "Failed"))}`;
+        messages.appendChild(resultCard);
+        messages.scrollTop = messages.scrollHeight;
+    } else if (msg.type === "done") {
+        if (currentStreamingBubble) {
+            currentStreamingBubble.classList.remove("streaming");
+            currentStreamingBubble.textContent = msg.response;
+            currentStreamingBubble = null;
+        }
+        if (msg.response && window.jarvisVoiceEnabled) {
+            import("./voiceEngine.js").then(m => m.speak(msg.response)).catch(() => {});
+        }
+    } else if (msg.type === "error") {
+        if (currentStreamingBubble) {
+            currentStreamingBubble.classList.remove("streaming");
+            currentStreamingBubble = null;
+        }
+        appendMessage(messages, `[Error]: ${msg.error}`, "bot-message error");
+    }
+}
 
+async function respond(messages, text, { speakBack = true } = {}) {
+
+    // 1. Native Backend Daemon (Primary Path)
+    if (isBackendOnline()) {
+        currentStreamingBubble = appendMessage(messages, "", "bot-message");
+        currentStreamingBubble.classList.add("streaming");
+
+        try {
+            sendAgentMessage(text, { sessionId: "default" });
+            return;
+        } catch (err) {
+            console.warn("Backend send error, falling back to direct Ollama:", err);
+            if (currentStreamingBubble) {
+                currentStreamingBubble.remove();
+                currentStreamingBubble = null;
+            }
+        }
+    }
+
+    // 2. Direct Ollama Fallback
     if (!ollamaAvailable) {
-
         return new Promise((resolve) => {
             setTimeout(() => {
                 const reply = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
                 appendMessage(messages, reply, "bot-message");
+                if (speakBack) {
+                    import("./voiceEngine.js").then(m => m.speak(reply)).catch(() => {});
+                }
                 resolve(reply);
             }, 500);
         });
@@ -335,7 +399,6 @@ async function respond(messages, text) {
     memory.saveHistory(history);
 
     const { model, host } = getSettings();
-
     const actionTaken = await classifyAndExecuteIntent(text);
 
     const bubble = appendMessage(messages, "", "bot-message");
@@ -344,32 +407,30 @@ async function respond(messages, text) {
     const outgoing = [{ role: "system", content: buildSystemPrompt(actionTaken) }, ...historyForModel()];
 
     try {
-
         const full = await chatStream(outgoing, {
             model,
             host,
             onToken: (chunk, fullSoFar) => {
-
                 bubble.textContent = fullSoFar;
                 messages.scrollTop = messages.scrollHeight;
             }
         });
 
         bubble.classList.remove("streaming");
-
         history.push({ role: "assistant", content: full });
         memory.saveHistory(history);
 
         maybeUpdateLongTermMemory();
+
+        if (speakBack) {
+            import("./voiceEngine.js").then(m => m.speak(full)).catch(() => {});
+        }
         return full;
 
     } catch (err) {
-
         console.error(err);
-
         bubble.classList.remove("streaming");
         bubble.textContent = "Local AI request failed — falling back to standby mode. Check the connection bar above.";
-
         ollamaAvailable = false;
         return "Local AI request failed. Standing by.";
     }

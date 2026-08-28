@@ -10,8 +10,97 @@ from "https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js";
 const EARTH_RADIUS = 2;
 const EARTH_RADIUS_KM = 6371;
 
-const TEX_BASE =
-    "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/";
+const PRIMARY_TEX_CDN = "https://threejs.org/examples/textures/planets/";
+const BACKUP_TEX_CDN = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/textures/planets/";
+
+const textureLoader = new THREE.TextureLoader();
+
+function generateProceduralGlobeCanvas() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2048;
+    canvas.height = 1024;
+    const ctx = canvas.getContext("2d");
+
+    const oceanGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    oceanGrad.addColorStop(0, "#081d38");
+    oceanGrad.addColorStop(0.5, "#0d315e");
+    oceanGrad.addColorStop(1, "#081d38");
+    ctx.fillStyle = oceanGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const continents = [
+        { x: 350, y: 300, rx: 220, ry: 150, color: "#22522c" },
+        { x: 280, y: 220, rx: 180, ry: 120, color: "#2e6336" },
+        { x: 550, y: 650, rx: 110, ry: 200, color: "#1e4d25" },
+        { x: 1250, y: 280, rx: 380, ry: 170, color: "#2c572b" },
+        { x: 1100, y: 240, rx: 140, ry: 90, color: "#376636" },
+        { x: 1080, y: 520, rx: 160, ry: 210, color: "#7a6b3b" },
+        { x: 1680, y: 700, rx: 130, ry: 90, color: "#8c6e3b" },
+        { x: 680, y: 130, rx: 110, ry: 60, color: "#c8dadf" },
+        { x: 1024, y: 970, rx: 950, ry: 70, color: "#e4f1f7" }
+    ];
+
+    continents.forEach(c => {
+        ctx.fillStyle = c.color;
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, c.rx, c.ry, Math.PI / 12, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Cyber grid lines across map
+    ctx.strokeStyle = "rgba(0, 255, 255, 0.12)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < canvas.width; x += 128) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += 64) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+
+    return canvas;
+}
+
+function loadGlobeTexture(filename) {
+    const localMap = {
+        "earth_atmos_2048.jpg": "./assets/textures/earth.jpg",
+        "earth_lights_2048.png": "./assets/textures/earth_lights.png",
+        "earth_specular_2048.jpg": "./assets/textures/earth_specular.jpg",
+        "earth_normal_2048.jpg": "./assets/textures/earth_normal.jpg"
+    };
+
+    const texture = new THREE.CanvasTexture(generateProceduralGlobeCanvas());
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    const primaryUrl = localMap[filename] || (PRIMARY_TEX_CDN + filename);
+
+    textureLoader.load(
+        primaryUrl,
+        (loaded) => {
+            texture.image = loaded.image;
+            texture.needsUpdate = true;
+        },
+        undefined,
+        () => {
+            textureLoader.load(
+                BACKUP_TEX_CDN + filename,
+                (bLoaded) => {
+                    texture.image = bLoaded.image;
+                    texture.needsUpdate = true;
+                }
+            );
+        }
+    );
+
+    return texture;
+}
 
 let renderer;
 let scene;
@@ -64,17 +153,11 @@ export function initMap() {
     });
 }
 
-/* Called by main.js right after the panel becomes visible,
-   since a canvas inside display:none has zero size at creation time */
 export function refreshMap() {
 
     ensureRenderer();
     resizeMap();
 }
-
-/* =====================================================
-   SCENE SETUP
-===================================================== */
 
 function ensureRenderer() {
 
@@ -134,14 +217,12 @@ function ensureRenderer() {
 
 function buildGlobe() {
 
-    const loader = new THREE.TextureLoader();
-
     const geometry = new THREE.SphereGeometry(EARTH_RADIUS, 96, 96);
 
     const material = new THREE.MeshPhongMaterial({
-        map: loader.load(TEX_BASE + "earth_atmos_2048.jpg"),
-        specularMap: loader.load(TEX_BASE + "earth_specular_2048.jpg"),
-        bumpMap: loader.load(TEX_BASE + "earth_normal_2048.jpg"),
+        map: loadGlobeTexture("earth_atmos_2048.jpg"),
+        specularMap: loadGlobeTexture("earth_specular_2048.jpg"),
+        bumpMap: loadGlobeTexture("earth_normal_2048.jpg"),
         bumpScale: 0.03,
         specular: new THREE.Color(0x333333),
         shininess: 6
@@ -205,6 +286,11 @@ function resizeMap() {
 function animateMap() {
 
     requestAnimationFrame(animateMap);
+
+    const panel = document.getElementById("mapPanel");
+    if (!panel || !panel.classList.contains("active")) {
+        return; // Skip rendering when globe panel is closed
+    }
 
     if (globeMesh) globeMesh.rotation.y += 0.0007;
     if (markerGroup) markerGroup.rotation.y = globeMesh.rotation.y;
@@ -403,7 +489,91 @@ async function handleSearch() {
     }
 }
 
+const OFFLINE_CITIES = {
+    "delhi": { lat: 28.6139, lon: 77.2090, name: "New Delhi", fullName: "New Delhi, India" },
+    "new delhi": { lat: 28.6139, lon: 77.2090, name: "New Delhi", fullName: "New Delhi, India" },
+    "mumbai": { lat: 19.0760, lon: 72.8777, name: "Mumbai", fullName: "Mumbai, Maharashtra, India" },
+    "bangalore": { lat: 12.9716, lon: 77.5946, name: "Bengaluru", fullName: "Bengaluru, Karnataka, India" },
+    "london": { lat: 51.5074, lon: -0.1278, name: "London", fullName: "London, United Kingdom" },
+    "tokyo": { lat: 35.6762, lon: 139.6503, name: "Tokyo", fullName: "Tokyo, Japan" },
+    "new york": { lat: 40.7128, lon: -74.0060, name: "New York", fullName: "New York, USA" },
+    "paris": { lat: 48.8566, lon: 2.3522, name: "Paris", fullName: "Paris, France" },
+    "dubai": { lat: 25.2048, lon: 55.2708, name: "Dubai", fullName: "Dubai, United Arab Emirates" },
+    "singapore": { lat: 1.3521, lon: 103.8198, name: "Singapore", fullName: "Singapore" },
+    "sydney": { lat: -33.8688, lon: 151.2093, name: "Sydney", fullName: "Sydney, Australia" },
+    "san francisco": { lat: 37.7749, lon: -122.4194, name: "San Francisco", fullName: "San Francisco, CA, USA" },
+    "beijing": { lat: 39.9042, lon: 116.4074, name: "Beijing", fullName: "Beijing, China" },
+    "cairo": { lat: 30.0444, lon: 31.2357, name: "Cairo", fullName: "Cairo, Egypt" },
+    "moscow": { lat: 55.7558, lon: 37.6173, name: "Moscow", fullName: "Moscow, Russia" },
+    "berlin": { lat: 52.5200, lon: 13.4050, name: "Berlin", fullName: "Berlin, Germany" },
+    "toronto": { lat: 43.6532, lon: -79.3832, name: "Toronto", fullName: "Toronto, Canada" }
+};
+
+export function flyCameraToPoint(lat, lon) {
+    if (!controls || !camera) return;
+    const targetVec = latLonToVector3(lat, lon, EARTH_RADIUS + 4.2);
+    camera.position.copy(targetVec);
+    controls.target.set(0, 0, 0);
+    controls.update();
+}
+
+export async function locateCityOrPlace(query) {
+    ensureRenderer();
+    const result = await geocode(query);
+    if (!result) return { success: false, error: `Could not geocode location "${query}"` };
+    
+    setPoint("origin", result);
+    const originInput = document.getElementById("originInput");
+    if (originInput) originInput.value = result.name || query;
+    
+    flyCameraToPoint(result.lat, result.lon);
+    return {
+        success: true,
+        name: result.name,
+        fullName: result.fullName,
+        lat: result.lat,
+        lon: result.lon
+    };
+}
+
+export async function calculateDistanceBetween(originQuery, destQuery) {
+    ensureRenderer();
+    const [resA, resB] = await Promise.all([geocode(originQuery), geocode(destQuery)]);
+    if (!resA || !resB) {
+        return { success: false, error: `Could not resolve one or both locations ("${originQuery}", "${destQuery}")` };
+    }
+
+    setPoint("origin", resA);
+    setPoint("destination", resB);
+    
+    const originInput = document.getElementById("originInput");
+    const destInput = document.getElementById("destInput");
+    if (originInput) originInput.value = resA.name;
+    if (destInput) destInput.value = resB.name;
+
+    const km = haversineDistanceKm(resA, resB);
+    const miles = km * 0.621371;
+
+    // Center camera between both points
+    const midLat = (resA.lat + resB.lat) / 2;
+    const midLon = (resA.lon + resB.lon) / 2;
+    flyCameraToPoint(midLat, midLon);
+
+    return {
+        success: true,
+        origin: resA.name,
+        destination: resB.name,
+        km: Math.round(km),
+        miles: Math.round(miles)
+    };
+}
+
 async function geocode(query) {
+
+    const cleaned = (query || "").toLowerCase().trim();
+    if (OFFLINE_CITIES[cleaned]) {
+        return { ...OFFLINE_CITIES[cleaned] };
+    }
 
     try {
 

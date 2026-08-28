@@ -50,41 +50,50 @@ export function isProactiveEnabled() {
 /**
  * Feeds live telemetry from the telemetry loop into the proactive engine
  */
-export function feedTelemetry({ fps, memory, uptimeSec }) {
+export function feedTelemetry({ fps, memory, uptimeSec, cpuPercent, battery }) {
     if (!enabled) return;
 
     const now = Date.now();
 
-    // 1. GPU / FPS Load Detection ("High GPU usage detected, running something demanding sir?")
+    // 1. High CPU / Host Processor Load
+    if (cpuPercent !== undefined && cpuPercent > 88 && canSpeak(now, 180000)) {
+        const cpuRemarks = [
+            `High processor load detected at ${Math.round(cpuPercent)}%, sir. Running something demanding?`,
+            "Host computational cores under heavy load, sir. Allocating background capacity.",
+            "Processor utilization spiking, sir. Diagnostics show high background activity."
+        ];
+        speakUnprompted(randomPick(cpuRemarks), "High CPU Load");
+        return;
+    }
+
+    // 2. GPU / FPS Load Detection ("High GPU usage detected, running something demanding sir?")
     if (previousFps >= 45 && fps < 28 && fps > 0) {
         fpsDropCounter++;
-        if (fpsDropCounter >= 2 && canSpeak(now, 120000)) {
+        if (fpsDropCounter >= 2 && canSpeak(now, 150000)) {
             fpsDropCounter = 0;
             const gpuRemarks = [
                 "High GPU usage detected. Running something demanding, sir?",
                 "Graphics pipeline experiencing heavy load, sir. Calibrating rendering buffers.",
-                "Frame rate dipping slightly, allocating auxiliary computational cycles.",
                 "Visual telemetry shows increased GPU load. Shall I optimize background threads, sir?"
             ];
             speakUnprompted(randomPick(gpuRemarks), "High GPU Load");
+            return;
         }
     } else {
         fpsDropCounter = 0;
     }
     previousFps = fps;
 
-    // 2. High Memory Detection
-    if (memory > 180 && !highMemoryAlertGiven && canSpeak(now, 240000)) {
-        highMemoryAlertGiven = true;
+    // 3. Low Battery Warning
+    if (battery && !battery.power_plugged && battery.percent <= 20 && canSpeak(now, 300000)) {
         speakUnprompted(
-            `Memory allocation is currently at ${memory} megabytes, sir. Inactive caches can be purged if desired.`,
-            "Memory Alert"
+            `Main battery reserves are down to ${battery.percent}%, sir. May I suggest connecting the power supply?`,
+            "Low Battery Warning"
         );
-    } else if (memory < 120) {
-        highMemoryAlertGiven = false;
+        return;
     }
 
-    // 3. Extended Session / Milestone Uptime
+    // 4. Extended Session / Milestone Uptime
     if (uptimeSec === 3600 && canSpeak(now, 60000)) {
         speakUnprompted(
             "You've been at the console for a full hour, sir. All subsystems remain fully optimized.",

@@ -203,6 +203,13 @@ function handleSpeechResult(event) {
 
         if (matchedWakeword) {
             wakewordActiveTimestamp = now;
+            // Awaken from Eco Standby immediately if asleep
+            import("./ecoMode.js").then(m => {
+                if (m.isEcoSleeping()) {
+                    m.wakeUp(`Wakeword '${matchedWakeword}'`);
+                }
+            }).catch(() => {});
+
             // Extract the command after the wakeword
             const idx = currentText.indexOf(matchedWakeword);
             commandBody = currentText.slice(idx + matchedWakeword.length).replace(/^[,\s.]+/, "").trim();
@@ -212,7 +219,7 @@ function handleSpeechResult(event) {
         if (event.results[event.results.length - 1].isFinal) {
             if (!commandBody) {
                 // User just said "Jarvis" or "Hey Jarvis"
-                notify("JARVIS: Listening, sir...");
+                notify("JARVIS: Online and listening, sir...");
                 speak("Yes, sir? I am listening.");
                 addSystemLog("Voice: Wakeword detected. Awaiting command.");
             } else {
@@ -230,157 +237,151 @@ async function executeVoiceCommand(rawText) {
     const text = rawText.toLowerCase().trim();
     if (!text) return;
 
+    window.jarvisVoiceEnabled = true;
     addSystemLog(`Voice command: "${rawText}"`);
     notify(`Voice: "${rawText}"`);
 
-    // Direct fast commands (instant responsiveness without waiting for LLM)
-    if (matchAny(text, ["open camera", "show camera", "start camera", "camera on", "live camera"])) {
+    // 1. Eco Sleep / Standby commands
+    if (matchAny(text, ["sleep mode", "eco mode", "standby mode", "go to sleep", "enter sleep"])) {
+        const { enterSleep } = await import("./ecoMode.js");
+        speak("Entering Eco Standby mode, sir. Call my name to wake me.");
+        enterSleep();
+        return;
+    }
+
+    if (matchAny(text, ["wake up", "awaken", "resume"])) {
+        const { wakeUp } = await import("./ecoMode.js");
+        wakeUp("Voice wake up command");
+        speak("Awakening systems. Online and ready, sir.");
+        return;
+    }
+
+    // 2. Google Search Commands ("search on google for...", "google...")
+    if (text.startsWith("search google for ") || text.startsWith("search on google for ") || text.startsWith("google ")) {
+        let query = text.replace(/^search (on )?google for /i, "").replace(/^google /i, "").trim();
+        if (query) {
+            speak(`Searching Google for ${query}, sir.`);
+            window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank");
+            addSystemLog(`Google Search: ${query}`);
+            return;
+        }
+    }
+
+    // 3. Desktop Application Launching
+    const appKeywords = [
+        { triggers: ["open calculator", "launch calculator", "open calc"], name: "calc", label: "Calculator" },
+        { triggers: ["open notepad", "launch notepad", "open text editor"], name: "notepad", label: "Notepad" },
+        { triggers: ["open chrome", "launch chrome", "open browser"], name: "chrome", label: "Chrome" },
+        { triggers: ["open vs code", "open vscode", "open code editor"], name: "code", label: "VS Code" },
+        { triggers: ["open task manager", "show task manager", "open taskmgr"], name: "taskmgr", label: "Task Manager" },
+        { triggers: ["open file explorer", "open files", "open explorer"], name: "explorer", label: "File Explorer" },
+        { triggers: ["open terminal", "open cmd", "open command prompt"], name: "cmd", label: "Terminal" },
+        { triggers: ["open settings", "windows settings"], name: "ms-settings:", label: "Settings" }
+    ];
+
+    for (const app of appKeywords) {
+        if (matchAny(text, app.triggers)) {
+            speak(`Launching ${app.label}, sir.`);
+            try {
+                const { execute_tool } = await import("./backendBridge.js");
+                fetch("http://localhost:8000/api/tools/execute", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ tool: "os_open_application", arguments: { app_name: app.name } })
+                }).catch(() => {});
+            } catch {}
+            return;
+        }
+    }
+
+    // 4. Fast UI Window Navigation
+    if (matchAny(text, ["open camera", "show camera", "start camera"])) {
         runCommandSafely("open_camera");
         speak("Opening camera feed.");
         return;
     }
 
-    if (matchAny(text, ["open dashboard", "show dashboard", "status", "system status", "show status"])) {
+    if (matchAny(text, ["open dashboard", "show status", "system status"])) {
         runCommandSafely("open_dashboard");
         speak("Opening system dashboard.");
         return;
     }
 
-    if (matchAny(text, ["open chat", "open ai", "chat panel", "talk to ai", "open console"])) {
+    if (matchAny(text, ["open chat", "open console", "chat window"])) {
         runCommandSafely("open_chat");
         speak("Chat console active.");
         return;
     }
 
-    if (matchAny(text, ["open viewer", "3d viewer", "show 3d", "3d model", "open 3d"])) {
+    if (matchAny(text, ["open viewer", "3d viewer", "show 3d"])) {
         runCommandSafely("open_viewer");
-        speak("Opening 3D visualization viewer.");
+        speak("Opening 3D viewer.");
         return;
     }
 
-    if (matchAny(text, ["solar system", "show solar", "planets"])) {
+    if (matchAny(text, ["solar system", "show solar"])) {
         runCommandSafely("open_viewer", { scene: "solar" });
         speak("Displaying solar system simulation.");
         return;
     }
 
-    if (matchAny(text, ["show earth", "globe 3d", "earth model"])) {
-        runCommandSafely("open_viewer", { scene: "earth" });
-        speak("Loading 3D Earth model.");
-        return;
-    }
-
-    if (matchAny(text, ["molecule", "molecules", "show molecule"])) {
-        runCommandSafely("open_viewer", { scene: "molecule" });
-        speak("Displaying molecular structure.");
-        return;
-    }
-
-    if (matchAny(text, ["neural network", "neural net", "neural model"])) {
-        runCommandSafely("open_viewer", { scene: "neural" });
-        speak("Displaying neural matrix visualization.");
-        return;
-    }
-
-    if (matchAny(text, ["open map", "open globe", "show map", "world map", "globe"])) {
+    if (matchAny(text, ["open map", "open globe", "show globe"])) {
         runCommandSafely("open_map");
         speak("Opening interactive globe.");
         return;
     }
 
-    if (matchAny(text, ["open research", "research agent", "research"])) {
-        runCommandSafely("open_research");
-        speak("Research agent online.");
-        return;
-    }
-
-    if (matchAny(text, ["open architect", "open asa", "solution architect", "architect"])) {
-        runCommandSafely("open_asa");
-        speak("Solution Architect engaged.");
-        return;
-    }
-
-    if (matchAny(text, ["open physics", "physics lab", "physics simulation", "physics"])) {
+    if (matchAny(text, ["open physics", "physics lab"])) {
         runCommandSafely("open_physics");
         speak("Physics laboratory live.");
         return;
     }
 
-    if (text.includes("spawn")) {
-        let spawnType = "box";
-        if (text.includes("car")) spawnType = "car";
-        else if (text.includes("ball") || text.includes("sphere")) spawnType = "ball";
-        else if (text.includes("cylinder")) spawnType = "cylinder";
-        else if (text.includes("wall")) spawnType = "wall";
-        else if (text.includes("ramp")) spawnType = "ramp";
-
-        runCommandSafely("open_physics", { spawn: spawnType });
-        speak(`Spawning ${spawnType} in physics simulation.`);
-        return;
-    }
-
-    if (matchAny(text, ["open projects", "project manager", "projects archive", "projects"])) {
+    if (matchAny(text, ["open projects", "project manager"])) {
         runCommandSafely("open_projects");
         speak("Opening project archive.");
         return;
     }
 
-    if (matchAny(text, ["close all", "close windows", "close window", "minimize", "hide windows", "clear screen"])) {
+    if (matchAny(text, ["open research", "research agent"])) {
+        runCommandSafely("open_research");
+        speak("Research agent online.");
+        return;
+    }
+
+    if (matchAny(text, ["open architect", "open asa"])) {
+        runCommandSafely("open_asa");
+        speak("Solution Architect engaged.");
+        return;
+    }
+
+    if (matchAny(text, ["close all", "close windows", "minimize"])) {
         runCommandSafely("close_all");
         speak("Closing all windows.");
         return;
     }
 
-    if (matchAny(text, ["what time is it", "tell me the time", "current time", "time"])) {
+    if (matchAny(text, ["what time is it", "tell me the time", "current time"])) {
         const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         speak(`The time is ${timeStr}, sir.`);
-        notify(`Current Time: ${timeStr}`);
+        notify(`Time: ${timeStr}`);
         return;
     }
 
-    if (matchAny(text, ["what date is it", "what is today's date", "what is the date", "date"])) {
-        const dateStr = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    if (matchAny(text, ["what date is it", "today's date", "what is the date"])) {
+        const dateStr = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
         speak(`Today is ${dateStr}, sir.`);
-        notify(`Current Date: ${dateStr}`);
+        notify(`Date: ${dateStr}`);
         return;
     }
 
-    if (matchAny(text, ["who are you", "what are you"])) {
-        speak("I am JARVIS. Just A Rather Very Intelligent System, at your service.");
-        return;
-    }
-
-    if (matchAny(text, ["quiet mode", "be quiet", "mute proactive", "silence", "stop talking unprompted"])) {
-        try {
-            const { setProactiveEnabled } = await import("./proactiveIntelligence.js");
-            setProactiveEnabled(false);
-            speak("Quiet mode engaged, sir. I shall only speak when addressed.");
-        } catch {}
-        return;
-    }
-
-    if (matchAny(text, ["speak freely", "enable proactive", "unmute proactive", "autonomous voice"])) {
-        try {
-            const { setProactiveEnabled } = await import("./proactiveIntelligence.js");
-            setProactiveEnabled(true);
-            speak("Proactive monitoring enabled, sir.");
-        } catch {}
-        return;
-    }
-
-    // Try LLM Intent Classification if available
+    // 5. Route all other requests, complex multi-step instructions, and conversation to the ReAct Agent
     try {
-        const intentResult = await classifyAndExecuteIntent(rawText);
-        if (intentResult) {
-            speak(`Executing ${intentResult.action.replace(/_/g, " ")}.`);
-            return;
-        }
-    } catch {
-        // Fall back to chat
+        await sendVoiceMessage(rawText, { speakBack: true });
+    } catch (err) {
+        console.error("Voice command execution failed:", err);
+        speak("I encountered an issue processing that command, sir.");
     }
-
-    // Route unhandled conversation or questions directly to AI Chat
-    sendVoiceMessage(rawText, { speakBack: true });
 }
 
 function matchAny(text, phrases) {

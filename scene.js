@@ -87,7 +87,7 @@ export function initScene(canvas) {
     });
 
     renderer.setPixelRatio(
-        Math.min(window.devicePixelRatio, 2)
+        Math.min(window.devicePixelRatio, 1.25)
     );
 
     renderer.setSize(
@@ -112,6 +112,14 @@ export function initScene(canvas) {
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("resize", handleResize);
 
+    document.addEventListener("eco-mode-change", (e) => {
+        if (e.detail?.sleeping) {
+            pauseScene();
+        } else {
+            resumeScene();
+        }
+    });
+
     animate();
 }
 
@@ -128,20 +136,21 @@ function createBloom() {
 
     composer.addPass(renderPass);
 
+    // Optimized bloom pass for high frame rates and low GPU power
     const bloomPass =
         new UnrealBloomPass(
             new THREE.Vector2(
-                window.innerWidth,
-                window.innerHeight
+                window.innerWidth / 2,
+                window.innerHeight / 2
             ),
-            1.2,
-            0.4,
-            0.8
+            0.9,
+            0.3,
+            0.85
         );
 
-    bloomPass.threshold = 0;
-    bloomPass.strength = 1.6;
-    bloomPass.radius = 0.5;
+    bloomPass.threshold = 0.05;
+    bloomPass.strength = 1.0;
+    bloomPass.radius = 0.35;
 
     composer.addPass(bloomPass);
 }
@@ -176,6 +185,12 @@ function createLights() {
     scene.add(point);
 }
 
+let neuralNodeMeshes = [];
+let connectionLineSegments = null;
+let totalLinePairs = [];
+let currentWinkIndex = 0;
+let isWinkingComplete = false;
+
 /* =====================================================
    NEURAL SPHERE
 ===================================================== */
@@ -183,67 +198,37 @@ function createLights() {
 function createNeuralSphere() {
 
     neuralGroup = new THREE.Group();
-
     scene.add(neuralGroup);
 
-    const material =
-        new THREE.MeshBasicMaterial({
-            color: 0x00ffff
-        });
-
-    const geometry =
-        new THREE.SphereGeometry(
-            0.035,
-            8,
-            8
-        );
-
+    const material = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+    const geometry = new THREE.SphereGeometry(0.035, 8, 8);
     const points = [];
+    neuralNodeMeshes = [];
 
     for (let i = 0; i < 500; i++) {
 
-        const phi =
-            Math.acos(
-                -1 + (2 * i) / 500
-            );
+        const phi = Math.acos(-1 + (2 * i) / 500);
+        const theta = Math.sqrt(800 * Math.PI) * phi;
 
-        const theta =
-            Math.sqrt(
-                800 * Math.PI
-            ) * phi;
+        const x = Math.cos(theta) * Math.sin(phi);
+        const y = Math.sin(theta) * Math.sin(phi);
+        const z = Math.cos(phi);
 
-        const x =
-            Math.cos(theta) *
-            Math.sin(phi);
+        const node = new THREE.Mesh(geometry, material.clone());
+        node.position.set(x * 2.2, y * 2.2, z * 2.2);
 
-        const y =
-            Math.sin(theta) *
-            Math.sin(phi);
-
-        const z =
-            Math.cos(phi);
-
-        const node =
-            new THREE.Mesh(
-                geometry,
-                material
-            );
-
-        node.position.set(
-            x * 2.2,
-            y * 2.2,
-            z * 2.2
-        );
+        // Start hidden at scale 0 for node-by-node winking
+        node.scale.set(0, 0, 0);
+        node.userData = {
+            index: i,
+            wunk: false,
+            winkTime: 0
+        };
 
         neuralGroup.add(node);
+        neuralNodeMeshes.push(node);
 
-        points.push(
-            new THREE.Vector3(
-                x * 2.2,
-                y * 2.2,
-                z * 2.2
-            )
-        );
+        points.push(new THREE.Vector3(x * 2.2, y * 2.2, z * 2.2));
     }
 
     createConnections(points);
@@ -255,65 +240,51 @@ function createNeuralSphere() {
 
 function createConnections(points) {
 
-    const lineMaterial =
-        new THREE.LineBasicMaterial({
-            color: 0x00ffff,
-            transparent: true,
-            opacity: 0.12
-        });
+    const lineMaterial = new THREE.LineBasicMaterial({
+        color: 0x00ffff,
+        transparent: true,
+        opacity: 0.14
+    });
 
     const maxDistance = 0.55;
-
-    const positions = [];
+    const linePairs = [];
 
     for (let i = 0; i < points.length; i++) {
-
-        for (
-            let j = i + 1;
-            j < points.length;
-            j++
-        ) {
-
-            const distance =
-                points[i].distanceTo(
-                    points[j]
-                );
-
+        for (let j = i + 1; j < points.length; j++) {
+            const distance = points[i].distanceTo(points[j]);
             if (distance < maxDistance) {
-
-                positions.push(
-                    points[i].x,
-                    points[i].y,
-                    points[i].z
-                );
-
-                positions.push(
-                    points[j].x,
-                    points[j].y,
-                    points[j].z
-                );
+                linePairs.push({
+                    i,
+                    j,
+                    maxIdx: Math.max(i, j),
+                    p1: points[i],
+                    p2: points[j]
+                });
             }
         }
     }
 
-    const geometry =
-        new THREE.BufferGeometry();
+    // Sort by maxIdx so lines draw outward in sync with nodes winking in
+    linePairs.sort((a, b) => a.maxIdx - b.maxIdx);
+    totalLinePairs = linePairs;
 
-    geometry.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-            positions,
-            3
-        )
-    );
+    const positions = new Float32Array(linePairs.length * 6);
+    for (let k = 0; k < linePairs.length; k++) {
+        const pair = linePairs[k];
+        positions[k * 6 + 0] = pair.p1.x;
+        positions[k * 6 + 1] = pair.p1.y;
+        positions[k * 6 + 2] = pair.p1.z;
+        positions[k * 6 + 3] = pair.p2.x;
+        positions[k * 6 + 4] = pair.p2.y;
+        positions[k * 6 + 5] = pair.p2.z;
+    }
 
-    const lines =
-        new THREE.LineSegments(
-            geometry,
-            lineMaterial
-        );
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setDrawRange(0, 0); // Initially 0 lines visible
 
-    neuralGroup.add(lines);
+    connectionLineSegments = new THREE.LineSegments(geometry, lineMaterial);
+    neuralGroup.add(connectionLineSegments);
 }
 
 /* =====================================================
@@ -347,7 +318,13 @@ function createInteractiveNodes() {
         );
 
         mesh.position.set(x * radius, y * radius, z * radius);
-        mesh.userData.phaseOffset = i * 0.7;
+        mesh.scale.set(0, 0, 0); // Start hidden for winking entry
+        mesh.userData = {
+            phaseOffset: i * 0.7,
+            winkThreshold: Math.floor((i + 1) * (500 / count)), // Wink milestone
+            wunk: false,
+            winkTime: 0
+        };
 
         nodeGroup.add(mesh);
 
@@ -364,9 +341,10 @@ function createInteractiveNodes() {
 
         ring.position.copy(mesh.position);
         ring.lookAt(0, 0, 0);
+        ring.scale.set(0, 0, 0); // Start hidden for winking entry
         nodeGroup.add(ring);
 
-        const entry = { key: def.key, label: def.label, mesh, callback: null };
+        const entry = { key: def.key, label: def.label, mesh, ring, callback: null };
 
         nodeEntries.push(entry);
         clickableObjects.push(mesh);
@@ -565,20 +543,120 @@ export function getFPS() {
    ANIMATE
 ===================================================== */
 
+let currentAgentState = "IDLE";
+let isScenePaused = false;
+
+document.addEventListener("agent-status", (e) => {
+    currentAgentState = e.detail || "IDLE";
+});
+
+export function pauseScene() {
+    isScenePaused = true;
+}
+
+export function resumeScene() {
+    if (isScenePaused) {
+        isScenePaused = false;
+        animate();
+    }
+}
+
 function animate() {
+
+    if (isScenePaused) return;
 
     requestAnimationFrame(animate);
 
     const elapsed = animationClock.getElapsedTime();
 
-    neuralGroup.rotation.y += 0.0016;
-    neuralGroup.rotation.x += 0.0005;
+    // Dynamically modulate rotation and pulse based on real agent lifecycle
+    let rotSpeedY = 0.0016;
+    let rotSpeedX = 0.0005;
+    let pulseSpeed = 3.0;
+    let pulseAmp = 0.15;
 
+    if (currentAgentState === "THINKING") {
+        rotSpeedY = 0.008;
+        rotSpeedX = 0.003;
+        pulseSpeed = 8.0;
+        pulseAmp = 0.35;
+    } else if (currentAgentState === "EXECUTING_TOOL") {
+        rotSpeedY = 0.012;
+        rotSpeedX = 0.005;
+        pulseSpeed = 12.0;
+        pulseAmp = 0.45;
+    } else if (currentAgentState === "SPEAKING") {
+        rotSpeedY = 0.003;
+        rotSpeedX = 0.001;
+        pulseSpeed = 5.0;
+        pulseAmp = 0.25;
+    }
+
+    neuralGroup.rotation.y += rotSpeedY;
+    neuralGroup.rotation.x += rotSpeedX;
+
+    // Wink node-by-node creation animation loop
+    if (!isWinkingComplete) {
+        currentWinkIndex += 8; // Wink ~8 nodes per frame
+        if (currentWinkIndex >= 500) {
+            currentWinkIndex = 500;
+            isWinkingComplete = true;
+        }
+
+        // Update line draw range
+        if (connectionLineSegments) {
+            let visibleLines = 0;
+            for (let k = 0; k < totalLinePairs.length; k++) {
+                if (totalLinePairs[k].maxIdx <= currentWinkIndex) {
+                    visibleLines += 2; // 2 vertices per line segment
+                } else {
+                    break;
+                }
+            }
+            connectionLineSegments.geometry.setDrawRange(0, visibleLines);
+        }
+    }
+
+    // Animate neural nodes winking in with spring/pop effect
+    for (let i = 0; i < currentWinkIndex && i < neuralNodeMeshes.length; i++) {
+        const node = neuralNodeMeshes[i];
+        if (!node.userData.wunk) {
+            node.userData.wunk = true;
+            node.userData.winkTime = elapsed;
+        }
+
+        const dt = elapsed - node.userData.winkTime;
+        if (dt < 0.3) {
+            const pop = Math.sin((dt / 0.3) * Math.PI) * 0.6 + (dt / 0.3);
+            node.scale.setScalar(pop);
+        } else {
+            node.scale.setScalar(1.0);
+        }
+    }
+
+    // Animate 10 feature nodes winking in as milestones are reached
     nodeEntries.forEach(entry => {
+        const mesh = entry.mesh;
+        const ring = entry.ring;
 
-        entry.mesh.scale.setScalar(
-            1 + Math.sin(elapsed * 3 + entry.mesh.userData.phaseOffset) * 0.15
-        );
+        if (currentWinkIndex >= mesh.userData.winkThreshold) {
+            if (!mesh.userData.wunk) {
+                mesh.userData.wunk = true;
+                mesh.userData.winkTime = elapsed;
+            }
+
+            const dt = elapsed - mesh.userData.winkTime;
+            if (dt < 0.4) {
+                const pop = Math.sin((dt / 0.4) * Math.PI) * 0.8 + (dt / 0.4);
+                mesh.scale.setScalar(pop);
+                if (ring) ring.scale.setScalar(pop);
+            } else {
+                mesh.scale.setScalar(
+                    1 + Math.sin(elapsed * pulseSpeed + mesh.userData.phaseOffset) * pulseAmp
+                );
+                if (ring) ring.scale.setScalar(1.0);
+            }
+        }
     });
 
     scaleVector.set(targetScale, targetScale, targetScale);

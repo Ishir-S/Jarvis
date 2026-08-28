@@ -2,6 +2,8 @@
    JARVIS X - UI SYSTEM
 ===================================================== */
 
+import { initHandCursor } from "./handCursor.js";
+
 let startup;
 let loaderFill;
 let bootText;
@@ -225,53 +227,12 @@ function setupMenuToggle() {
 ===================================================== */
 
 function startBootSequence() {
-
-    let progress = 0;
-    let index = 0;
-
-    const interval =
-        setInterval(() => {
-
-            progress += 12.5;
-
-            loaderFill.style.width =
-                progress + "%";
-
-            if (
-                index <
-                bootLines.length
-            ) {
-
-                bootText.textContent =
-                    bootLines[index];
-
-                addSystemLog(
-                    bootLines[index]
-                );
-
-                index++;
-            }
-
-            if (progress >= 100) {
-
-                clearInterval(
-                    interval
-                );
-
-                setTimeout(() => {
-
-                    startup.classList.add(
-                        "hidden"
-                    );
-
-                    notify(
-                        "Good to see you again."
-                    );
-
-                }, 1200);
-            }
-
-        }, 700);
+    if (startup) {
+        startup.style.display = "none";
+        startup.classList.add("hidden");
+    }
+    addSystemLog("JARVIS Core Online — Center Neural Sphere winking into existence node by node.");
+    notify("Good to see you again.");
 }
 
 /* =====================================================
@@ -421,7 +382,7 @@ export function setCameraStatus(
 ===================================================== */
 
 export function updateTelemetry(
-    { fps, memory, threads, uptimeSec }
+    { fps, memory, threads, uptimeSec, cpuPercent, diskPercent, battery }
 ) {
 
     if (fpsValue) {
@@ -431,12 +392,12 @@ export function updateTelemetry(
 
     if (memoryValue) {
         memoryValue.textContent =
-            `Memory: ${memory} MB`;
+            `RAM: ${memory} MB`;
     }
 
     if (threadsValue) {
-        threadsValue.textContent =
-            `Threads: ${threads}`;
+        const cpuStr = cpuPercent !== undefined ? `CPU: ${cpuPercent}% (${threads}T)` : `Threads: ${threads}`;
+        threadsValue.textContent = cpuStr;
     }
 
     if (uptimeValue) {
@@ -467,37 +428,7 @@ function formatUptime(totalSeconds) {
 ===================================================== */
 
 export function initGhostCursor() {
-
-    ghostCursor =
-        document.getElementById(
-            "ghostCursor"
-        );
-
-    if (!ghostCursor) return;
-
-    window.addEventListener(
-        "pointermove",
-        (event) => {
-
-            ghostCursor.style.display =
-                "block";
-
-            ghostCursor.style.left =
-                `${event.clientX}px`;
-
-            ghostCursor.style.top =
-                `${event.clientY}px`;
-        }
-    );
-
-    document.addEventListener(
-        "pointerleave",
-        () => {
-
-            ghostCursor.style.display =
-                "none";
-        }
-    );
+    initHandCursor();
 }
 
 /* =====================================================
@@ -529,46 +460,7 @@ export function addSystemLog(
 }
 
 export function startAutoLogs() {
-
-    const logs = [
-
-        "Neural matrix stable",
-
-        "Voice engine ready",
-
-        "Optical sensors online",
-
-        "Memory integrity verified",
-
-        "Telemetry synchronized",
-
-        "Network status secure",
-
-        "Scanning environment",
-
-        "Subsystem check passed",
-
-        "Power distribution normal",
-
-        "AI core responsive"
-
-    ];
-
-    setInterval(() => {
-
-        const random =
-            logs[
-                Math.floor(
-                    Math.random() *
-                    logs.length
-                )
-            ];
-
-        addSystemLog(
-            random
-        );
-
-    }, 6000);
+    // Replaced with real live telemetry and tool event stream from JARVIS backend
 }
 
 /* =====================================================

@@ -136,6 +136,54 @@ function ensureWorld() {
     animate();
 }
 
+function createGridFloorTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#041018";
+    ctx.fillRect(0, 0, 512, 512);
+
+    ctx.strokeStyle = "rgba(0, 255, 255, 0.15)";
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= 512; i += 32) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0); ctx.lineTo(i, 512);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, i); ctx.lineTo(512, i);
+        ctx.stroke();
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(15, 15);
+    return tex;
+}
+
+function createBoxTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#2a3b4c";
+    ctx.fillRect(0, 0, 256, 256);
+
+    ctx.strokeStyle = "rgba(0, 255, 255, 0.4)";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(4, 4, 248, 248);
+
+    ctx.beginPath();
+    ctx.moveTo(4, 4); ctx.lineTo(252, 252);
+    ctx.moveTo(252, 4); ctx.lineTo(4, 252);
+    ctx.stroke();
+
+    return new THREE.CanvasTexture(canvas);
+}
+
 function buildGround() {
 
     const groundBody = new CANNON.Body({
@@ -149,7 +197,11 @@ function buildGround() {
 
     const groundMesh = new THREE.Mesh(
         new THREE.PlaneGeometry(60, 60),
-        new THREE.MeshStandardMaterial({ color: 0x041018, roughness: 1 })
+        new THREE.MeshStandardMaterial({
+            map: createGridFloorTexture(),
+            roughness: 0.6,
+            metalness: 0.2
+        })
     );
 
     groundMesh.rotation.x = -Math.PI / 2;
@@ -187,6 +239,11 @@ const FIXED_STEP = 1 / 60;
 function animate() {
 
     requestAnimationFrame(animate);
+
+    const panel = document.getElementById("physicsPanel");
+    if (!panel || !panel.classList.contains("active")) {
+        return; // Skip simulation and rendering when physics panel is closed
+    }
 
     const delta = Math.min(clock.getDelta(), 0.1);
 
@@ -281,7 +338,11 @@ function spawnBox() {
 
     const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(size.x, size.y, size.z),
-        new THREE.MeshStandardMaterial({ color: 0x00c8c8 })
+        new THREE.MeshStandardMaterial({
+            map: createBoxTexture(),
+            roughness: 0.4,
+            metalness: 0.3
+        })
     );
     mesh.castShadow = true;
 

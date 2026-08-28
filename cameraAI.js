@@ -265,6 +265,13 @@ function loop() {
 
     if (!video || video.readyState < 2 || !ctx) return;
 
+    const cameraPanel = document.getElementById("cameraPanel");
+    const isCameraOpen = cameraPanel && cameraPanel.classList.contains("active");
+
+    if (!isCameraOpen && !document.getElementById("gestureControlToggle")?.checked && !state.hands) {
+        return; // Suspend ML inference when camera panel, gesture controls, and hand tracking are all closed
+    }
+
     if (!Object.values(state).some(Boolean)) {
 
         cancelAnimationFrame(rafId);
@@ -606,21 +613,7 @@ function drawHands() {
             wrist.y * overlay.height + 20
         );
 
-        // Map index fingertip to screen ghost cursor
-        const ghostCursor = document.getElementById("ghostCursor");
-        if (ghostCursor && hand.landmarks && hand.landmarks[8]) {
-            const screenX = (1 - hand.landmarks[8].x) * window.innerWidth;
-            const screenY = hand.landmarks[8].y * window.innerHeight;
-            ghostCursor.style.display = "block";
-            ghostCursor.style.left = `${screenX}px`;
-            ghostCursor.style.top = `${screenY}px`;
-
-            if (hand.gesture === "pinch" || hand.gesture === "fist") {
-                ghostCursor.style.transform = "translate(-50%, -50%) scale(1.3)";
-            } else {
-                ghostCursor.style.transform = "translate(-50%, -50%) scale(1)";
-            }
-        }
+        // Hand cursor tracking & pinch clicks are managed by handCursor.js
     });
 }
 

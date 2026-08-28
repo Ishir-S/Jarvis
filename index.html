@@ -157,6 +157,9 @@
         <button id="projectsBtn">
            PROJECTS
         </button>
+        <button id="networkBtn">
+           NETWORK
+        </button>
     </div>
 
     <!-- ========================= -->
@@ -236,6 +239,29 @@
 
         </div>
 
+    </div>
+    
+    <!-- ========================= -->
+    <!-- NETWORK WINDOW -->
+    <!-- ========================= -->
+
+    <div id="networkPanel" class="panel-hidden">
+        <div class="window-header">
+            <span>JARVIS NETWORK</span>
+            <button class="closeWindow" data-close="networkPanel">✕</button>
+        </div>
+        <div class="window-content">
+            <div class="card" style="margin-bottom: 10px;">
+                <h3>LOCAL NODE</h3>
+                <div id="localNodeDisplay">Loading...</div>
+                <button id="toggleRoleBtn" style="margin-top:10px; padding: 5px 10px; cursor: pointer;">BECOME HOST</button>
+            </div>
+            <div class="card">
+                <h3>DISCOVERED DEVICES</h3>
+                <ul id="networkDevicesList" style="list-style: none; padding: 0;">
+                </ul>
+            </div>
+        </div>
     </div>
 
     <!-- ========================= -->
@@ -327,13 +353,18 @@
         <div class="ollamaBar">
 
             <span class="ollamaDot" id="chatOllamaDot"></span>
-            <span id="chatOllamaLabel">Checking local AI engine...</span>
+            <span id="chatOllamaLabel">Connecting to Grok API...</span>
+
+            <input id="grokApiKeyInput" type="password" placeholder="Grok API Key..." title="Enter xAI Grok API Key" style="width: 110px; background: rgba(0,0,0,0.5); border: 1px solid rgba(0,255,255,0.3); color: cyan; font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; outline: none;" />
 
             <select id="chatModelSelect" class="ollamaModelSelect">
-                <option value="">No models found</option>
+                <option value="grok-2-latest">grok-2-latest</option>
+                <option value="grok-2-1212">grok-2-1212</option>
+                <option value="grok-beta">grok-beta</option>
+                <option value="grok-vision-beta">grok-vision-beta</option>
             </select>
 
-            <button id="chatOllamaRefresh" class="ollamaRefreshBtn" title="Refresh connection">⟳</button>
+            <button id="chatOllamaRefresh" class="ollamaRefreshBtn" title="Save &amp; Refresh connection">⟳</button>
 
         </div>
 
@@ -1186,11 +1217,12 @@
     <!-- MODULES -->
     <!-- ========================= -->
     <div id="ghostCursor">
-
         <div class="cursorCore"></div>
-
         <div class="cursorRing"></div>
-
+        <div class="cursorTargetTicks"></div>
+        <div class="cursorSnapRing"></div>
+        <div class="cursorPinchPulse"></div>
+        <div class="cursorBadge">TRACKING</div>
     </div>
     <script type="importmap">
         {

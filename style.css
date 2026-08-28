@@ -50,22 +50,7 @@ body{
    ========================================== */
 
 #startup{
-    position:fixed;
-    inset:0;
-    z-index:9999;
-
-    display:flex;
-    align-items:center;
-    justify-content:center;
-
-    background:#000;
-
-    transition:1.2s ease;
-}
-
-#startup.hidden{
-    opacity:0;
-    pointer-events:none;
+    display:none !important;
 }
 
 .startup-center{
@@ -255,6 +240,7 @@ body{
    ========================================== */
 
 #dashboardPanel,
+#networkPanel,
 #cameraPanel,
 #chatPanel{
 
@@ -282,6 +268,7 @@ body{
 }
 
 #dashboardPanel.active,
+#networkPanel.active,
 #cameraPanel.active,
 #chatPanel.active{
     opacity:1;
@@ -3913,3 +3900,324 @@ body{
 
     opacity:.4;
 }
+
+/* ==========================================
+   JARVIS TOOL EXECUTION CARDS (CHAT STREAM)
+   ========================================== */
+
+.bot-tool-call {
+    margin: 8px 0;
+    padding: 10px 14px;
+    background: rgba(0, 255, 255, 0.08);
+    border-left: 3px solid var(--cyan);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #b8f7ff;
+    animation: fadeIn 0.3s ease;
+}
+
+.bot-tool-call code {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--cyan);
+    font-family: monospace;
+}
+
+.bot-tool-result {
+    margin: 6px 0 10px 0;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(0, 255, 255, 0.15);
+    border-radius: 4px;
+    font-size: 0.82rem;
+    color: #e0ffff;
+}
+
+.bot-tool-result.success {
+    border-left: 3px solid #00ff88;
+}
+
+.bot-tool-result.failure {
+    border-left: 3px solid var(--danger);
+}
+
+.result-badge {
+    display: inline-block;
+    font-weight: bold;
+    margin-right: 6px;
+}
+
+.bot-tool-result.success .result-badge {
+    color: #00ff88;
+}
+
+.bot-tool-result.failure .result-badge {
+    color: var(--danger);
+}
+
+.tool-icon {
+    display: inline-block;
+    margin-right: 4px;
+}
+
+/* ==========================================
+   JARVIS ECO STANDBY & LOW-POWER SLEEP OVERLAY
+   ========================================== */
+
+.ecoSleepOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: radial-gradient(circle at center, rgba(3, 14, 25, 0.96) 0%, rgba(1, 4, 10, 0.99) 100%);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.ecoSleepOverlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.ecoSleepCore {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+}
+
+.ecoRing {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 255, 255, 0.2);
+    border-top: 2px solid #00ffff;
+    border-bottom: 2px solid #00d4ff;
+    box-shadow: 0 0 25px rgba(0, 255, 255, 0.3), inset 0 0 15px rgba(0, 255, 255, 0.2);
+    animation: ecoSpin 4s linear infinite, ecoBreath 3s ease-in-out infinite;
+}
+
+@keyframes ecoSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes ecoBreath {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 20px #00ffff); }
+}
+
+.ecoText {
+    font-family: 'Orbitron', 'Cinzel', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #00ffff;
+    text-shadow: 0 0 12px rgba(0, 255, 255, 0.6);
+}
+
+.ecoSubtext {
+    font-size: 0.85rem;
+    color: rgba(184, 247, 255, 0.7);
+    letter-spacing: 1.5px;
+    max-width: 380px;
+}
+
+/* ==========================================
+   JARVIS ADVANCED HUD GHOST CURSOR
+   ========================================== */
+
+#ghostCursor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 44px;
+    height: 44px;
+    pointer-events: none;
+    z-index: 100000;
+    transform: translate(-50%, -50%);
+    display: none;
+    transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.27), opacity 0.2s ease;
+    will-change: transform, left, top;
+}
+
+#ghostCursor .cursorCore {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    background: #00ffff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px #00ffff, 0 0 20px #00ffff;
+    transition: all 0.15s ease;
+}
+
+#ghostCursor .cursorRing {
+    position: absolute;
+    inset: 0;
+    border: 1.5px dashed rgba(0, 255, 255, 0.65);
+    border-radius: 50%;
+    animation: cursorSpin 6s linear infinite;
+    box-shadow: 0 0 12px rgba(0, 255, 255, 0.3);
+    transition: all 0.2s ease;
+}
+
+#ghostCursor .cursorTargetTicks {
+    position: absolute;
+    inset: -6px;
+    border: 2px solid transparent;
+    border-top-color: rgba(0, 255, 255, 0.85);
+    border-bottom-color: rgba(0, 255, 255, 0.85);
+    border-radius: 50%;
+    animation: cursorSpinReverse 4s linear infinite;
+    transition: all 0.2s ease;
+}
+
+#ghostCursor .cursorSnapRing {
+    position: absolute;
+    inset: -12px;
+    border: 1px solid rgba(0, 255, 170, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.27);
+}
+
+#ghostCursor .cursorPinchPulse {
+    position: absolute;
+    inset: -2px;
+    border: 2px solid #00ffff;
+    border-radius: 50%;
+    opacity: 0;
+    transform: scale(1);
+    pointer-events: none;
+}
+
+#ghostCursor .cursorBadge {
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%) translateX(10px);
+    font-size: 0.62rem;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #00ffff;
+    background: rgba(0, 20, 30, 0.88);
+    border: 1px solid rgba(0, 255, 255, 0.45);
+    backdrop-filter: blur(6px);
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    box-shadow: 0 0 12px rgba(0, 255, 255, 0.25);
+    pointer-events: none;
+    transition: all 0.2s ease;
+}
+
+@keyframes cursorSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes cursorSpinReverse {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
+
+/* Dynamic Cursor States */
+
+/* Snapped state (Magnetically locked onto button) */
+#ghostCursor.snapped {
+    transform: translate(-50%, -50%) scale(1.15);
+}
+#ghostCursor.snapped .cursorRing {
+    border-color: #00ffaa;
+    border-style: solid;
+    box-shadow: 0 0 18px rgba(0, 255, 170, 0.7);
+}
+#ghostCursor.snapped .cursorCore {
+    background: #00ffaa;
+    box-shadow: 0 0 14px #00ffaa;
+}
+#ghostCursor.snapped .cursorSnapRing {
+    opacity: 1;
+    transform: scale(1);
+    border-color: #00ffaa;
+}
+#ghostCursor.snapped .cursorBadge {
+    color: #00ffaa;
+    border-color: #00ffaa;
+}
+
+/* Pinch state (Single Click) */
+#ghostCursor.pinching {
+    transform: translate(-50%, -50%) scale(0.85);
+}
+#ghostCursor.pinching .cursorCore {
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    box-shadow: 0 0 20px #ffffff, 0 0 35px #00ffff;
+}
+#ghostCursor.pinching .cursorPinchPulse {
+    animation: pinchPulseWave 0.4s ease-out forwards;
+}
+#ghostCursor.pinching .cursorBadge {
+    color: #ffffff;
+    background: rgba(0, 255, 255, 0.4);
+}
+
+@keyframes pinchPulseWave {
+    0% { transform: scale(0.8); opacity: 1; border-color: #ffffff; }
+    100% { transform: scale(2.2); opacity: 0; border-color: #00ffff; }
+}
+
+/* Hold state (Continuous Drag / Hold Click) */
+#ghostCursor.holding {
+    transform: translate(-50%, -50%) scale(1.25);
+}
+#ghostCursor.holding .cursorCore {
+    width: 16px;
+    height: 16px;
+    background: #00ffff;
+    box-shadow: 0 0 25px #00ffff, 0 0 50px #00ffff;
+    animation: corePulse 0.6s infinite alternate;
+}
+#ghostCursor.holding .cursorRing {
+    border-color: #ffaa00;
+    border-style: solid;
+    box-shadow: 0 0 25px rgba(255, 170, 0, 0.8);
+    animation: cursorSpin 1.5s linear infinite;
+}
+#ghostCursor.holding .cursorBadge {
+    color: #ffaa00;
+    border-color: #ffaa00;
+    background: rgba(40, 20, 0, 0.9);
+}
+
+@keyframes corePulse {
+    0% { transform: translate(-50%, -50%) scale(1); }
+    100% { transform: translate(-50%, -50%) scale(1.3); }
+}
+
+/* Highlight style for buttons currently magnetically snapped */
+.hand-snapped {
+    outline: 2px solid #00ffff !important;
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.6), inset 0 0 10px rgba(0, 255, 255, 0.3) !important;
+    transform: scale(1.04) !important;
+    transition: all 0.15s ease !important;
+}
+
+
+
+
+#networkPanel { left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.9); }
+#networkPanel.active { transform: translate(-50%, -50%) scale(1); }

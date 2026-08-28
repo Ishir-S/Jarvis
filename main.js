@@ -45,6 +45,9 @@ import { initPhysics, refreshPhysicsPanel, spawnByName, setGravity } from "./phy
 import { registerCommands } from "./commandBridge.js";
 import { initVoiceEngine, toggleVoice } from "./voiceEngine.js";
 import { initProactiveIntelligence, feedTelemetry } from "./proactiveIntelligence.js";
+import { initBackendBridge, onAgentStatus } from "./backendBridge.js";
+import { initEcoMode } from "./ecoMode.js";
+import { initNetwork } from "./network.js";
 
 let buttons;
 
@@ -56,6 +59,9 @@ async function init() {
 
     initUI();
     initGhostCursor();
+    initBackendBridge();
+    initEcoMode();
+    initNetwork();
 
     buttons = getButtons();
 
@@ -88,7 +94,6 @@ async function init() {
         setCameraStatus(event.detail);
     });
 
-    startAutoLogs();
     startTelemetryLoop();
 
     notify("Welcome Back");
@@ -199,8 +204,26 @@ function registerActionCommands() {
 
         open_map: (params) => {
             openMapCommand();
-            if (params.origin || params.destination) {
+            if (params.query) {
+                setTimeout(() => import("./map.js").then(m => m.locateCityOrPlace(params.query)), 400);
+            } else if (params.origin && params.destination) {
+                setTimeout(() => import("./map.js").then(m => m.calculateDistanceBetween(params.origin, params.destination)), 400);
+            } else if (params.origin || params.destination) {
                 setTimeout(() => searchRoute(params.origin, params.destination), 400);
+            }
+        },
+
+        locate_place: (params) => {
+            openMapCommand();
+            if (params.query) {
+                setTimeout(() => import("./map.js").then(m => m.locateCityOrPlace(params.query)), 400);
+            }
+        },
+
+        find_distance: (params) => {
+            openMapCommand();
+            if (params.origin && params.destination) {
+                setTimeout(() => import("./map.js").then(m => m.calculateDistanceBetween(params.origin, params.destination)), 400);
             }
         },
 
@@ -215,6 +238,11 @@ function registerActionCommands() {
         },
 
         open_physics: (params) => {
+            openPhysicsCommand();
+            if (params.spawn) setTimeout(() => spawnByName(params.spawn), 350);
+        },
+
+        spawn_physics: (params) => {
             openPhysicsCommand();
             if (params.spawn) setTimeout(() => spawnByName(params.spawn), 350);
         },
@@ -335,18 +363,12 @@ function startTelemetryLoop() {
     setInterval(() => {
 
         const fps = getFPS();
-
-        const memory = performance.memory
-            ? Math.round(performance.memory.usedJSHeapSize / 1048576)
-            : Math.round(40 + Math.random() * 20);
-
-        const threads = navigator.hardwareConcurrency || 4;
+        window.jarvisFPS = fps;
 
         const uptimeSec =
             Math.floor((Date.now() - startTime) / 1000);
 
-        updateTelemetry({ fps, memory, threads, uptimeSec });
-        feedTelemetry({ fps, memory, threads, uptimeSec });
+        feedTelemetry({ fps, uptimeSec });
 
     }, 1000);
 }

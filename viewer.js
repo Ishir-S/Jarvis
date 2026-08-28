@@ -24,10 +24,54 @@ from "https://unpkg.com/three@0.165.0/examples/jsm/controls/TransformControls.js
 import { addSystemLog, notify } from "./ui.js";
 import { startHandTracking, onHandResult } from "./handTracking.js";
 
-const TEX_BASE =
-    "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/";
+const PRIMARY_TEX_CDN = "https://threejs.org/examples/textures/";
+const BACKUP_TEX_CDN = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/textures/";
 
 const textureLoader = new THREE.TextureLoader();
+
+function getLocalTexturePath(relativePath) {
+    const map = {
+        "lava/lavatile.jpg": "./assets/textures/sun_lava.jpg",
+        "planets/earth_atmos_2048.jpg": "./assets/textures/earth.jpg",
+        "planets/earth_lights_2048.png": "./assets/textures/earth_lights.png",
+        "planets/earth_specular_2048.jpg": "./assets/textures/earth_specular.jpg",
+        "planets/earth_normal_2048.jpg": "./assets/textures/earth_normal.jpg",
+        "planets/moon_1024.jpg": "./assets/textures/moon.jpg"
+    };
+    return map[relativePath] || null;
+}
+
+function loadTextureWithFallback(relativePath, proceduralFallbackFn) {
+    const fallbackCanvas = proceduralFallbackFn ? proceduralFallbackFn() : generateProceduralEarthCanvas();
+    const texture = new THREE.CanvasTexture(fallbackCanvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    const localUrl = getLocalTexturePath(relativePath);
+    const primaryUrl = localUrl || (PRIMARY_TEX_CDN + relativePath);
+    const backupUrl = BACKUP_TEX_CDN + relativePath;
+
+    textureLoader.load(
+        primaryUrl,
+        (loadedTex) => {
+            texture.image = loadedTex.image;
+            texture.needsUpdate = true;
+        },
+        undefined,
+        () => {
+            textureLoader.load(
+                backupUrl,
+                (bTex) => {
+                    texture.image = bTex.image;
+                    texture.needsUpdate = true;
+                }
+            );
+        }
+    );
+
+    return texture;
+}
 const clock = new THREE.Clock();
 
 let renderer;
@@ -410,6 +454,11 @@ function animateViewer() {
 
     requestAnimationFrame(animateViewer);
 
+    const panel = document.getElementById("viewerPanel");
+    if (!panel || !panel.classList.contains("active")) {
+        return; // Skip rendering when viewer is closed
+    }
+
     const elapsed = clock.getElapsedTime();
     const delta = clock.getDelta();
 
@@ -666,6 +715,137 @@ function createRingTexture() {
     return new THREE.CanvasTexture(canvas);
 }
 
+/** Procedural 2K Earth Surface (Oceans, Continents, Vegetation) */
+function generateProceduralEarthCanvas() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2048;
+    canvas.height = 1024;
+    const ctx = canvas.getContext("2d");
+
+    const oceanGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    oceanGrad.addColorStop(0, "#081d38");
+    oceanGrad.addColorStop(0.5, "#0b2b54");
+    oceanGrad.addColorStop(1, "#081d38");
+    ctx.fillStyle = oceanGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const continents = [
+        { x: 350, y: 300, rx: 220, ry: 150, color: "#2e5a27" },
+        { x: 280, y: 220, rx: 180, ry: 120, color: "#3d6e32" },
+        { x: 550, y: 650, rx: 110, ry: 200, color: "#285220" },
+        { x: 1250, y: 280, rx: 380, ry: 170, color: "#3a602c" },
+        { x: 1100, y: 240, rx: 140, ry: 90, color: "#487538" },
+        { x: 1080, y: 520, rx: 160, ry: 210, color: "#8a7642" },
+        { x: 1680, y: 700, rx: 130, ry: 90, color: "#a37a45" },
+        { x: 680, y: 130, rx: 110, ry: 60, color: "#dbe8e8" },
+        { x: 1024, y: 970, rx: 950, ry: 70, color: "#eef8ff" }
+    ];
+
+    continents.forEach(c => {
+        ctx.fillStyle = c.color;
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, c.rx, c.ry, Math.PI / 12, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    for (let i = 0; i < 2000; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const r = 2 + Math.random() * 14;
+        ctx.fillStyle = Math.random() > 0.4 ? "rgba(40,80,30,0.25)" : "rgba(180,150,90,0.2)";
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    return canvas;
+}
+
+/** Procedural 2K Earth Night Lights Canvas */
+function generateProceduralEarthLightsCanvas() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2048;
+    canvas.height = 1024;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cityClusters = [
+        { x: 420, y: 320, r: 40 }, { x: 320, y: 340, r: 35 }, { x: 380, y: 280, r: 25 },
+        { x: 1060, y: 250, r: 60 }, { x: 1120, y: 270, r: 45 }, { x: 1020, y: 280, r: 35 },
+        { x: 1450, y: 350, r: 65 }, { x: 1550, y: 320, r: 50 }, { x: 1620, y: 360, r: 40 },
+        { x: 1320, y: 440, r: 55 }, { x: 1380, y: 480, r: 40 }, { x: 1100, y: 520, r: 30 }
+    ];
+
+    cityClusters.forEach(c => {
+        const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
+        grad.addColorStop(0, "rgba(255, 215, 120, 0.95)");
+        grad.addColorStop(0.4, "rgba(255, 160, 50, 0.5)");
+        grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    return canvas;
+}
+
+/** Procedural Sun Lava Texture Canvas */
+function generateProceduralLavaCanvas() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#cc3300";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 800; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const r = 10 + Math.random() * 35;
+
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, "rgba(255, 230, 100, 0.9)");
+        grad.addColorStop(0.5, "rgba(255, 100, 0, 0.6)");
+        grad.addColorStop(1, "rgba(100, 10, 0, 0)");
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    return canvas;
+}
+
+/** Procedural Moon Texture Canvas */
+function generateProceduralMoonCanvas() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+
+    ctx.fillStyle = "#a0a0a0";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const maria = [
+        { x: 300, y: 200, rx: 120, ry: 90 },
+        { x: 450, y: 220, rx: 140, ry: 100 },
+        { x: 600, y: 260, rx: 90, ry: 70 }
+    ];
+    maria.forEach(m => {
+        ctx.fillStyle = "#585858";
+        ctx.beginPath();
+        ctx.ellipse(m.x, m.y, m.rx, m.ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    return canvas;
+}
+
 /* =====================================================
    SOLAR SYSTEM
 ===================================================== */
@@ -674,61 +854,104 @@ function buildSolarSystem() {
 
     const group = new THREE.Group();
 
-    const lavaTex = textureLoader.load(TEX_BASE + "lava/lavatile.jpg");
+    // 1. Sun Mesh & Emissive Atmosphere
+    const lavaTex = loadTextureWithFallback("lava/lavatile.jpg", generateProceduralLavaCanvas);
     lavaTex.wrapS = lavaTex.wrapT = THREE.RepeatWrapping;
 
     const sun = new THREE.Mesh(
-        new THREE.SphereGeometry(0.6, 48, 48),
-        new THREE.MeshBasicMaterial({ map: lavaTex, color: 0xffaa55 })
+        new THREE.SphereGeometry(0.65, 48, 48),
+        new THREE.MeshBasicMaterial({ map: lavaTex, color: 0xffea88 })
     );
-
     group.add(sun);
 
-    const sunLight = new THREE.PointLight(0xffcc66, 3, 60);
+    // SCIENTIFIC LIGHTING: Real solar radiation point light originating from (0,0,0) inside Sun
+    const sunLight = new THREE.PointLight(0xfffaed, 5.0, 150, 0.4);
+    sunLight.position.set(0, 0, 0);
     group.add(sunLight);
 
+    // Soft solar corona aura
     const sunGlow = new THREE.Mesh(
-        new THREE.SphereGeometry(0.72, 32, 32),
+        new THREE.SphereGeometry(0.78, 32, 32),
         new THREE.MeshBasicMaterial({
             color: 0xffaa33,
             transparent: true,
-            opacity: 0.18,
+            opacity: 0.22,
             side: THREE.BackSide
         })
     );
-
     group.add(sunGlow);
 
+    // Deep space minimal ambient fill (starlight) - ensures dark scientific day/night terminators on planets
+    const spaceAmbient = new THREE.AmbientLight(0x060c18, 0.08);
+    group.add(spaceAmbient);
+
+    // 2. All 8 Planets (NASA Textures + Procedural Canvas Fallbacks)
     const planetDefs = [
         {
-            name: "mercury",
-            r: 0.1, dist: 1.15, speed: 1.6, spin: 0.4,
-            texture: () => createRockyTexture("#9c9187", "#5a5148", 120)
+            name: "Mercury",
+            r: 0.09, dist: 1.15, speed: 1.6, spin: 0.4,
+            texPath: "planets/mercury.jpg",
+            fallback: () => createRockyTexture("#88827a", "#4a4640", 120)
         },
         {
-            name: "venus",
-            r: 0.15, dist: 1.7, speed: 1.1, spin: 0.3,
-            texture: () => createBandedTexture(["#e8c887", "#d9a55f", "#f0d9a0", "#c98f4d"])
+            name: "Venus",
+            r: 0.14, dist: 1.6, speed: 1.17, spin: 0.2,
+            texPath: "planets/venus_atmosphere.jpg",
+            fallback: () => createBandedTexture(["#e6c280", "#d4a359", "#f5db9e", "#c28c46"])
         },
         {
-            name: "mars",
-            r: 0.13, dist: 2.3, speed: 0.75, spin: 0.5,
-            texture: () => createRockyTexture("#b3502f", "#7a2f18", 100)
+            name: "Earth",
+            r: 0.15, dist: 2.15, speed: 1.0, spin: 1.0,
+            texPath: "planets/earth_atmos_2048.jpg",
+            fallback: generateProceduralEarthCanvas,
+            hasMoon: true
         },
         {
-            name: "jupiter",
-            r: 0.32, dist: 3.1, speed: 0.4, spin: 1.1,
-            texture: () => createBandedTexture(["#d8b48c", "#c99768", "#e8cba3", "#b9835a", "#f0dcc0"])
+            name: "Mars",
+            r: 0.11, dist: 2.7, speed: 0.8, spin: 0.95,
+            texPath: "planets/mars.jpg",
+            fallback: () => createRockyTexture("#b84c2a", "#782810", 110)
+        },
+        {
+            name: "Jupiter",
+            r: 0.35, dist: 3.5, speed: 0.43, spin: 2.4,
+            texPath: "planets/jupiter.jpg",
+            fallback: () => createBandedTexture(["#c89e74", "#b07e54", "#dcb28a", "#9a623a", "#e8c8a8"])
+        },
+        {
+            name: "Saturn",
+            r: 0.28, dist: 4.6, speed: 0.32, spin: 2.2,
+            texPath: "planets/saturn.jpg",
+            fallback: () => createBandedTexture(["#d4be8d", "#bfa872", "#e6d3a5", "#a89058"]),
+            hasRing: true,
+            ringInner: 0.38, ringOuter: 0.65
+        },
+        {
+            name: "Uranus",
+            r: 0.21, dist: 5.5, speed: 0.23, spin: 1.4,
+            texPath: "planets/uranus.jpg",
+            fallback: () => createBandedTexture(["#7de3e3", "#5bc4c4", "#99f0f0", "#4ca8a8"]),
+            hasRing: true,
+            ringInner: 0.28, ringOuter: 0.40
+        },
+        {
+            name: "Neptune",
+            r: 0.20, dist: 6.4, speed: 0.18, spin: 1.5,
+            texPath: "planets/neptune.jpg",
+            fallback: () => createBandedTexture(["#2746ab", "#193187", "#3b5ed9", "#112266"])
         }
     ];
 
     const planets = planetDefs.map(def => {
 
+        const planetTex = loadTextureWithFallback(def.texPath, def.fallback);
+
         const planet = new THREE.Mesh(
             new THREE.SphereGeometry(def.r, 32, 32),
             new THREE.MeshStandardMaterial({
-                map: canvasToTexture(def.texture()),
-                roughness: 0.9
+                map: planetTex,
+                roughness: 0.85,
+                metalness: 0.05
             })
         );
 
@@ -736,15 +959,43 @@ function buildSolarSystem() {
 
         const pivot = new THREE.Group();
         pivot.add(planet);
+
+        // Add Moon if Earth
+        if (def.hasMoon) {
+            const moonPivot = new THREE.Group();
+            moonPivot.position.x = def.dist;
+
+            const moonTex = loadTextureWithFallback("planets/moon_1024.jpg", generateProceduralMoonCanvas);
+            const moon = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04, 16, 16),
+                new THREE.MeshStandardMaterial({ map: moonTex, roughness: 0.9 })
+            );
+            moon.position.x = 0.32;
+            moonPivot.add(moon);
+            pivot.add(moonPivot);
+            def.moonPivot = moonPivot;
+        }
+
+        // Add Rings if Saturn or Uranus
+        if (def.hasRing) {
+            const ringGeom = new THREE.RingGeometry(def.ringInner, def.ringOuter, 64);
+            const ringMat = new THREE.MeshBasicMaterial({
+                map: createRingTexture(),
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            const ring = new THREE.Mesh(ringGeom, ringMat);
+            ring.rotation.x = Math.PI / 2.4;
+            ring.position.x = def.dist;
+            pivot.add(ring);
+        }
+
         group.add(pivot);
 
-        // orbit path
+        // Orbit trajectory line
         const orbitPoints = [];
-
-        for (let i = 0; i <= 96; i++) {
-
-            const angle = (i / 96) * Math.PI * 2;
-
+        for (let i = 0; i <= 128; i++) {
+            const angle = (i / 128) * Math.PI * 2;
             orbitPoints.push(new THREE.Vector3(
                 Math.cos(angle) * def.dist,
                 0,
@@ -754,75 +1005,27 @@ function buildSolarSystem() {
 
         const orbit = new THREE.LineLoop(
             new THREE.BufferGeometry().setFromPoints(orbitPoints),
-            new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25 })
+            new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.18 })
         );
-
         group.add(orbit);
 
         return { ...def, mesh: planet, pivot };
     });
 
-    // Saturn: same as above but with a ring
-    const saturnTex = canvasToTexture(createBandedTexture(["#e4d2a3", "#d9c48b", "#f0e6c6", "#c8b378"]));
-
-    const saturn = new THREE.Mesh(
-        new THREE.SphereGeometry(0.26, 32, 32),
-        new THREE.MeshStandardMaterial({ map: saturnTex, roughness: 0.9 })
-    );
-
-    const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.38, 0.62, 64),
-        new THREE.MeshBasicMaterial({
-            map: createRingTexture(),
-            transparent: true,
-            side: THREE.DoubleSide
-        })
-    );
-
-    ring.rotation.x = Math.PI / 2.4;
-
-    const saturnPivot = new THREE.Group();
-    const saturnDist = 4;
-
-    saturn.position.x = saturnDist;
-    ring.position.x = saturnDist;
-
-    saturnPivot.add(saturn);
-    saturnPivot.add(ring);
-    group.add(saturnPivot);
-
-    const saturnOrbitPoints = [];
-
-    for (let i = 0; i <= 96; i++) {
-
-        const angle = (i / 96) * Math.PI * 2;
-
-        saturnOrbitPoints.push(new THREE.Vector3(
-            Math.cos(angle) * saturnDist, 0, Math.sin(angle) * saturnDist
-        ));
-    }
-
-    group.add(new THREE.LineLoop(
-        new THREE.BufferGeometry().setFromPoints(saturnOrbitPoints),
-        new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25 })
-    ));
-
-    planets.push({ speed: 0.28, spin: 0.9, mesh: saturn, pivot: saturnPivot });
-
-    // starfield backdrop
+    // Starfield backdrop
     group.add(buildStarfield());
 
     const update = (elapsed) => {
 
         sun.rotation.y = elapsed * 0.05;
-        lavaTex.offset.x = elapsed * 0.02;
+        if (lavaTex.offset) lavaTex.offset.x = elapsed * 0.02;
 
         sunGlow.scale.setScalar(1 + Math.sin(elapsed * 1.5) * 0.03);
 
         planets.forEach(p => {
-
             p.pivot.rotation.y = elapsed * p.speed * 0.3;
             p.mesh.rotation.y = elapsed * p.spin;
+            if (p.moonPivot) p.moonPivot.rotation.y = elapsed * 2.5;
         });
 
         group.rotation.y += 0.0002;
@@ -832,7 +1035,7 @@ function buildSolarSystem() {
 }
 
 /* =====================================================
-   EARTH (detailed, real satellite imagery)
+   EARTH (detailed, real satellite imagery with fallback)
 ===================================================== */
 
 function buildEarth() {
@@ -844,11 +1047,11 @@ function buildEarth() {
     const earth = new THREE.Mesh(
         earthGeom,
         new THREE.MeshPhongMaterial({
-            map: textureLoader.load(TEX_BASE + "planets/earth_atmos_2048.jpg"),
-            specularMap: textureLoader.load(TEX_BASE + "planets/earth_specular_2048.jpg"),
-            bumpMap: textureLoader.load(TEX_BASE + "planets/earth_normal_2048.jpg"),
+            map: loadTextureWithFallback("planets/earth_atmos_2048.jpg", generateProceduralEarthCanvas),
+            specularMap: loadTextureWithFallback("planets/earth_specular_2048.jpg", generateProceduralEarthCanvas),
+            bumpMap: loadTextureWithFallback("planets/earth_normal_2048.jpg", generateProceduralEarthCanvas),
             bumpScale: 0.04,
-            emissiveMap: textureLoader.load(TEX_BASE + "planets/earth_lights_2048.png"),
+            emissiveMap: loadTextureWithFallback("planets/earth_lights_2048.png", generateProceduralEarthLightsCanvas),
             emissive: new THREE.Color(0xffffaa),
             emissiveIntensity: 1.4,
             specular: new THREE.Color(0x333333),
@@ -890,7 +1093,7 @@ function buildEarth() {
     const moon = new THREE.Mesh(
         new THREE.SphereGeometry(0.35, 32, 32),
         new THREE.MeshStandardMaterial({
-            map: textureLoader.load(TEX_BASE + "planets/moon_1024.jpg"),
+            map: loadTextureWithFallback("planets/moon_1024.jpg", generateProceduralMoonCanvas),
             roughness: 1
         })
     );
